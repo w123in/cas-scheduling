@@ -1,0 +1,18 @@
+{
+  "name": "scheduling-platform",
+  "version": "4.0.0",
+  "description": "排课平台 - 多人共享版（支持在线修改老师名字）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "cookie-parser": "^1.4.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
