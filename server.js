@@ -15,7 +15,21 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'data.json');
 
-const TEACHER_COLORS = ['#3b5bdb','#0c9b9b','#30a46c','#e8833a','#7c4dff','#e8439a','#e5484d','#4a6cf7'];
+// 10种高区分度颜色（色相分布均匀，避免同色系混淆）
+const TEACHER_COLORS = [
+  '#e03131', // 红
+  '#f76707', // 橙
+  '#e8a317', // 金
+  '#2f9e44', // 绿
+  '#0ca678', // 青绿
+  '#1098ad', // 青
+  '#1c7ed6', // 蓝
+  '#7048e8', // 紫
+  '#c2255c', // 玫红
+  '#8b5a2b', // 棕
+];
+// 兼职老师统一藏青色（避免与取消课程的灰色混淆）
+const PART_TIME_COLOR = '#1c2d5a';
 
 function getDefaultDB() {
   return {
@@ -31,6 +45,8 @@ function getDefaultDB() {
       { username: 'teacher6', password: '123456', role: 'teacher', name: '老师6', teacherIndex: 5 },
       { username: 'teacher7', password: '123456', role: 'teacher', name: '老师7', teacherIndex: 6 },
       { username: 'teacher8', password: '123456', role: 'teacher', name: '老师8', teacherIndex: 7 },
+      { username: 'teacher9', password: '123456', role: 'teacher', name: '老师9', teacherIndex: 8 },
+      { username: 'teacher10', password: '123456', role: 'teacher', name: '老师10', teacherIndex: 9 },
     ],
     teachers: [],
     students: [],
@@ -59,7 +75,7 @@ function getMonday(d) {
 
 function initTeachers(DB) {
   DB.teachers = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     const u = DB.users.find(u => u.username === 'teacher' + (i + 1));
     DB.teachers.push({
       id: 't' + (i + 1),
@@ -88,6 +104,8 @@ function initSampleCourses(DB) {
     { day:3, name:'\u6982\u7387\u8bba',       start:'10:00', end:'11:30', loc:'1\u53f7\u697c301', teacher:'t1', desc:'\u968f\u673a\u53d8\u91cf' },
     { day:4, name:'\u8ba1\u7b97\u673a\u7f51\u7edc',   start:'13:00', end:'14:30', loc:'\u673a\u623fA',    teacher:'t7', desc:'TCP/IP' },
     { day:4, name:'\u5b66\u672f\u8bb2\u5ea7',     start:'15:00', end:'17:00', loc:'\u62a5\u544a\u5385',    teacher:'t8', desc:'\u4eba\u5de5\u667a\u80fd' },
+    { day:2, name:'\u827a\u672f\u8d4f\u6790',     start:'16:00', end:'17:30', loc:'\u827a\u672f\u697c201', teacher:'t9', desc:'\u5370\u8c61\u6d3e\u8d4f\u6790' },
+    { day:3, name:'\u54f2\u5b66\u5bfc\u8bba',     start:'14:00', end:'15:30', loc:'3\u53f7\u697c501', teacher:'t10', desc:'\u53e4\u5e0c\u814a\u54f2\u5b66' },
   ];
   sample.forEach((s, idx) => {
     const teacher = DB.teachers.find(t => t.id === s.teacher);
@@ -100,7 +118,7 @@ function initSampleCourses(DB) {
       location: s.loc,
       teacherId: s.teacher,
       description: s.desc,
-      color: teacher ? teacher.color : '#3b5bdb',
+      color: teacher ? teacher.color : TEACHER_COLORS[6],
       createdBy: 'scheduler'
     });
   });
@@ -183,7 +201,11 @@ function authRequired(req, res, next) {
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
-  const user = DB.users.find(u => u.username === username && u.password === password);
+  // 支持用户名或姓名登录：先按用户名匹配，再按姓名匹配
+  let user = DB.users.find(u => u.username === username && u.password === password);
+  if (!user) {
+    user = DB.users.find(u => u.name === username && u.password === password);
+  }
   if (!user) {
     return res.status(401).json({ error: 'wrong username or password' });
   }
@@ -227,16 +249,21 @@ app.get('/api/data', authRequired, (req, res) => {
 });
 
 app.post('/api/courses', authRequired, (req, res) => {
-  const { name, date, startTime, endTime, location, teacherId, description, repeat, weekdays, studentIds } = req.body;
+  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, repeat, weekdays, studentIds } = req.body;
   if (!name || !date || !startTime || !endTime || !teacherId) {
     return res.status(400).json({ error: 'missing required fields' });
   }
+  // 兼职老师必须有名字
+  if (teacherId === 'guest' && !guestTeacherName) {
+    return res.status(400).json({ error: '请输入兼职老师姓名' });
+  }
   const teacher = DB.teachers.find(t => t.id === teacherId);
-  const color = teacher ? teacher.color : '#3b5bdb';
+  const color = teacherId === 'guest' ? PART_TIME_COLOR : (teacher ? teacher.color : TEACHER_COLORS[6]);
   const baseCourse = {
     name, date, startTime, endTime,
     location: location || '',
     teacherId,
+    guestTeacherName: teacherId === 'guest' ? guestTeacherName : '',
     description: description || '',
     color,
     createdBy: req.user.username,
@@ -320,17 +347,20 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
   const course = DB.courses.find(c => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'course not found' });
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
-  const { name, date, startTime, endTime, location, teacherId, description, studentIds, status } = req.body;
-  const teacher = DB.teachers.find(t => t.id === (teacherId || course.teacherId));
+  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, studentIds, status } = req.body;
+  const newTeacherId = teacherId || course.teacherId;
+  const teacher = DB.teachers.find(t => t.id === newTeacherId);
+  const newColor = newTeacherId === 'guest' ? PART_TIME_COLOR : (teacher ? teacher.color : course.color);
   Object.assign(course, {
     name: name || course.name,
     date: date || course.date,
     startTime: startTime || course.startTime,
     endTime: endTime || course.endTime,
     location: location !== undefined ? location : course.location,
-    teacherId: teacherId || course.teacherId,
+    teacherId: newTeacherId,
+    guestTeacherName: newTeacherId === 'guest' ? (guestTeacherName || course.guestTeacherName || '') : '',
     description: description !== undefined ? description : course.description,
-    color: teacher ? teacher.color : course.color,
+    color: newColor,
     studentIds: studentIds !== undefined ? studentIds : (course.studentIds || []),
     status: status !== undefined ? status : (course.status || 'normal')
   });
@@ -469,6 +499,48 @@ function canEditCourse(user, course) {
   return false;
 }
 
+/* ---------- 签到统计 API ---------- */
+app.get('/api/stats/attendance', authRequired, (req, res) => {
+  const { year, month } = req.query;
+  const y = parseInt(year) || new Date().getFullYear();
+  const m = parseInt(month) || (new Date().getMonth() + 1); // 1-12
+  const startDate = `${y}-${String(m).padStart(2,'0')}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const endDate = `${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+  // 该月所有课程
+  const monthCourses = DB.courses.filter(c => c.date >= startDate && c.date <= endDate);
+
+  const stats = DB.students.map(student => {
+    const courses = monthCourses.filter(c => c.studentIds && c.studentIds.includes(student.id));
+    const total = courses.length;
+    const normal = courses.filter(c => c.status !== 'cancelled').length;
+    const cancelled = courses.filter(c => c.status === 'cancelled').length;
+    const pastCourses = courses.filter(c => c.date < todayStr);
+    const pastNormal = pastCourses.filter(c => c.status !== 'cancelled').length;
+    const pastCancelled = pastCourses.filter(c => c.status === 'cancelled').length;
+    // 签到率 = 过去已上的正常课程 / 过去的课程总数（排除未到来）
+    const rate = pastCourses.length > 0 ? Math.round((pastNormal / pastCourses.length) * 100) : (total > 0 ? 100 : 0);
+    return {
+      studentId: student.id,
+      studentName: student.name,
+      total,
+      normal,
+      cancelled,
+      upcoming: total - pastCourses.length,
+      pastTotal: pastCourses.length,
+      pastNormal,
+      pastCancelled,
+      rate
+    };
+  });
+  // 按签到率从低到高排序
+  stats.sort((a, b) => a.rate - b.rate);
+  res.json({ year: y, month: m, stats });
+});
+
 /* ---------- Socket.io ---------- */
 io.on('connection', (socket) => {
   console.log('client connected:', socket.id);
@@ -480,5 +552,5 @@ io.on('connection', (socket) => {
 /* ---------- Start Server ---------- */
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Accounts: admin/admin123, scheduler/scheduler123, teacher1~8/123456`);
+  console.log(`Accounts: admin/admin123, scheduler/scheduler123, teacher1~10/123456`);
 });

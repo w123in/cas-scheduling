@@ -324,8 +324,8 @@ a { color: var(--primary); text-decoration: none; }
     </div>
     <p class="login-sub">登录以管理你的课程安排</p>
     <div class="form-group">
-      <label>用户名</label>
-      <input type="text" id="loginUser" placeholder="请输入用户名" autocomplete="off">
+      <label>用户名 / 老师姓名</label>
+      <input type="text" id="loginUser" placeholder="输入用户名或老师姓名" autocomplete="off">
     </div>
     <div class="form-group">
       <label>密码</label>
@@ -333,6 +333,7 @@ a { color: var(--primary); text-decoration: none; }
     </div>
     <button class="btn btn-primary login-btn" onclick="handleLogin()">登 录</button>
     <div class="login-error" id="loginError"></div>
+    <p style="margin-top:12px;font-size:12px;color:var(--text-muted);text-align:center;">老师可直接输入姓名登录，如「老师1」</p>
   </div>
 </div>
 
@@ -353,6 +354,10 @@ a { color: var(--primary); text-decoration: none; }
       <button class="nav-item" data-page="teachers" onclick="switchPage('teachers')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
         老师管理
+      </button>
+      <button class="nav-item admin-only" data-page="attendance" onclick="switchPage('attendance')" id="attendanceNavItem" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+        签到统计
       </button>
       <button class="nav-item admin-only" data-page="settings" onclick="switchPage('settings')" id="settingsNavItem" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -504,6 +509,10 @@ a { color: var(--primary); text-decoration: none; }
       <div class="page" id="page-settings">
         <div class="teachers-page" id="settingsContainer"></div>
       </div>
+      <!-- 签到统计页 -->
+      <div class="page" id="page-attendance">
+        <div class="teachers-page" id="attendanceContainer"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -557,7 +566,10 @@ a { color: var(--primary); text-decoration: none; }
         </div>
         <div class="form-group">
           <label>授课老师<span class="required">*</span></label>
-          <select id="courseTeacher"></select>
+          <select id="courseTeacher" onchange="handleTeacherChange()"></select>
+          <div id="guestTeacherContainer" style="display:none;margin-top:8px;">
+            <input type="text" id="guestTeacherName" placeholder="请输入兼职老师姓名" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);outline:none;font-size:14px;">
+          </div>
         </div>
       </div>
       <div class="form-row">
@@ -610,7 +622,7 @@ a { color: var(--primary); text-decoration: none; }
       <div class="form-group">
         <div class="color-label-row">
           颜色标签（自动绑定授课老师）
-          <span class="color-preview-dot" id="colorPreview" style="background:#3b5bdb;"></span>
+          <span class="color-preview-dot" id="colorPreview" style="background:#e03131;"></span>
         </div>
       </div>
       <div class="form-group" id="statusGroup" style="display:none;">
@@ -641,21 +653,26 @@ const DAY_START = 7;   // 日视图起始小时
 const DAY_END = 22;    // 日视图结束小时
 const HOUR_HEIGHT = 56; // 每小时像素高度
 
-// 颜色方案
+// 颜色方案 — 10种高区分度颜色 + 兼职灰
 const COLORS = [
-  { name: '蓝色',   value: '#3b5bdb', bg: '#eef1fd', text: '#2b44a8' },
-  { name: '青色',   value: '#0c9b9b', bg: '#e0f5f5', text: '#076a6a' },
-  { name: '绿色',   value: '#30a46c', bg: '#dcefe2', text: '#1d7a4d' },
-  { name: '橙色',   value: '#e8833a', bg: '#fdf0e3', text: '#a85c1f' },
-  { name: '紫色',   value: '#7c4dff', bg: '#efe7ff', text: '#5a2fd6' },
-  { name: '粉色',   value: '#e8439a', bg: '#fde7f2', text: '#a82a6e' },
-  { name: '红色',   value: '#e5484d', bg: '#fde8e9', text: '#a82a2e' },
-  { name: '靛蓝',   value: '#4a6cf7', bg: '#e8edfd', text: '#2c44b0' },
+  { name: '红色',   value: '#e03131', bg: '#fde8e8', text: '#c92a2a' },
+  { name: '橙色',   value: '#f76707', bg: '#fff0e6', text: '#d9480f' },
+  { name: '金色',   value: '#e8a317', bg: '#fff9db', text: '#e67700' },
+  { name: '绿色',   value: '#2f9e44', bg: '#ebfbee', text: '#2b8a3e' },
+  { name: '青绿',   value: '#0ca678', bg: '#e6fcf5', text: '#087f5b' },
+  { name: '青色',   value: '#1098ad', bg: '#e3fafc', text: '#0b7285' },
+  { name: '蓝色',   value: '#1c7ed6', bg: '#e7f5ff', text: '#1971c2' },
+  { name: '紫色',   value: '#7048e8', bg: '#f3f0ff', text: '#5f3dc4' },
+  { name: '玫红',   value: '#c2255c', bg: '#ffeaef', text: '#a61e4d' },
+  { name: '棕色',   value: '#8b5a2b', bg: '#faf0e6', text: '#7c4a1e' },
+  { name: '兼职藏青', value: '#1c2d5a', bg: '#eef1f8', text: '#15233d' },
 ];
 const COLOR_BY_DEFAULT = COLORS[0].value;
 
-// 老师颜色
-const TEACHER_COLORS = ['#3b5bdb','#0c9b9b','#30a46c','#e8833a','#7c4dff','#e8439a','#e5484d','#4a6cf7'];
+// 老师颜色 — 与后端一致
+const TEACHER_COLORS = ['#e03131','#f76707','#e8a317','#2f9e44','#0ca678','#1098ad','#1c7ed6','#7048e8','#c2255c','#8b5a2b'];
+// 兼职老师统一藏青色
+const PART_TIME_COLOR = '#1c2d5a';
 
 /* ---------- 数据层（API + Socket.io） ---------- */
 let DB = { teachers: [], courses: [] };
@@ -732,6 +749,10 @@ function initSocket() {
     const idx = DB.teachers.findIndex(t => t.id === teacher.id);
     if (idx >= 0) {
       DB.teachers[idx] = teacher;
+      // 同步更新该老师所有课程的颜色
+      DB.courses.forEach(c => {
+        if (c.teacherId === teacher.id) c.color = teacher.color;
+      });
       initTeacherFilter();
       initTeacherSelect();
       renderCurrentView();
@@ -822,10 +843,7 @@ function enterApp() {
   applyPermission();
   switchView(currentView);
   renderCurrentView();
-  // 老师选择变化时自动更新颜色
-  document.getElementById('courseTeacher').addEventListener('change', function() {
-    updateColorFromTeacher(this.value);
-  });
+  // 老师选择变化时通过 onchange="handleTeacherChange()" 处理
 }
 
 function renderUserInfo() {
@@ -930,6 +948,11 @@ function initTeacherFilter() {
     opt.textContent = t.name;
     sel.appendChild(opt);
   });
+  // 添加兼职老师筛选选项
+  const guestOpt = document.createElement('option');
+  guestOpt.value = 'guest';
+  guestOpt.textContent = '兼职老师';
+  sel.appendChild(guestOpt);
   // 老师默认锁定自己
   if (currentUser.role === 'teacher') {
     const teacher = DB.teachers.find(t => t.username === currentUser.username);
@@ -1057,6 +1080,11 @@ function initTeacherSelect() {
     opt.textContent = t.name;
     sel.appendChild(opt);
   });
+  // 添加兼职老师选项
+  const guestOpt = document.createElement('option');
+  guestOpt.value = 'guest';
+  guestOpt.textContent = '兼职老师（手动输入）';
+  sel.appendChild(guestOpt);
 }
 
 function getFilteredCourses() {
@@ -1098,11 +1126,12 @@ function switchPage(page) {
   });
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
-  var titleMap = { calendar: '日历排课', teachers: '老师管理', settings: '设置' };
+  var titleMap = { calendar: '日历排课', teachers: '老师管理', settings: '设置', attendance: '签到统计' };
   document.getElementById('topbarTitle').textContent = titleMap[page] || '';
   document.getElementById('calendarToolbar').style.display = page === 'calendar' ? '' : 'none';
   if (page === 'teachers') renderTeachersPage();
   if (page === 'settings') renderSettingsPage();
+  if (page === 'attendance') renderAttendancePage();
   if (page === 'calendar') renderCurrentView();
   toggleSidebar(false);
 }
@@ -1135,6 +1164,15 @@ function getColorMeta(colorValue) {
 
 function getTeacherById(id) {
   return DB.teachers.find(t => t.id === id);
+}
+
+// 获取课程老师显示名（兼职老师用手动输入的名字）
+function getTeacherDisplayName(course) {
+  if (course.teacherId === 'guest') {
+    return course.guestTeacherName || '兼职老师';
+  }
+  const teacher = getTeacherById(course.teacherId);
+  return teacher ? teacher.name : '';
 }
 
 function getRepeatBadge(course) {
@@ -1223,7 +1261,7 @@ function renderDayView() {
       border-left-color:${cardBorder};background:${cardBg};${isCancelled ? 'opacity:0.7;' : ''}"
       onclick="openCourseModal('${c.id}')" title="${canEdit ? '点击编辑' : '点击查看'}">
       <div class="cc-title" style="color:${cardText};${isCancelled ? 'text-decoration:line-through;' : ''}">${escapeHtml(c.name)}${isCancelled ? '<span style="font-size:10px;background:#9097a8;color:#fff;padding:1px 4px;border-radius:3px;margin-left:4px;">取消</span>' : getRepeatBadge(c)}</div>
-      <div class="cc-meta">${c.startTime}-${c.endTime}${teacher ? ' · ' + escapeHtml(teacher.name) : ''}</div>
+      <div class="cc-meta">${c.startTime}-${c.endTime} · ${escapeHtml(getTeacherDisplayName(c))}</div>
       ${height >= 56 && c.location ? `<div class="cc-meta">${escapeHtml(c.location)}</div>` : ''}
     </div>`;
   });
@@ -1304,7 +1342,7 @@ function renderWeekView() {
         border-left-color:${cardBorder};background:${cardBg};${isCancelled ? 'opacity:0.7;' : ''}"
         onclick="openCourseModal('${c.id}')">
         <div class="cc-title" style="color:${cardText};${isCancelled ? 'text-decoration:line-through;' : ''}">${escapeHtml(c.name)}${isCancelled ? '<span style="font-size:10px;background:#9097a8;color:#fff;padding:1px 4px;border-radius:3px;margin-left:4px;">取消</span>' : getRepeatBadge(c)}</div>
-        <div class="cc-meta">${c.startTime}-${c.endTime}${teacher ? ' '+escapeHtml(teacher.name) : ''}</div>
+        <div class="cc-meta">${c.startTime}-${c.endTime} ${escapeHtml(getTeacherDisplayName(c))}</div>
         ${height >= 50 && c.location ? `<div class="cc-meta">${escapeHtml(c.location)}</div>` : ''}
       </div>`;
     });
@@ -1644,6 +1682,126 @@ async function resetAllData() {
 }
 
 /* ============================================================
+   签到统计页
+   ============================================================ */
+let attendanceYear = null;
+let attendanceMonth = null;
+
+function renderAttendancePage() {
+  const now = new Date();
+  if (!attendanceYear) attendanceYear = now.getFullYear();
+  if (!attendanceMonth) attendanceMonth = now.getMonth() + 1;
+
+  const container = document.getElementById('attendanceContainer');
+  let html = `<div class="page-header">
+    <div>
+      <h2>签到统计</h2>
+      <div class="page-desc">按学生统计当月课程签到率，取消的课程不计入签到</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <select id="attMonthSelect" onchange="changeAttendanceMonth()" style="padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;">
+  `;
+  for (let m = 1; m <= 12; m++) {
+    html += `<option value="${m}" ${m === attendanceMonth ? 'selected' : ''}>${m}月</option>`;
+  }
+  html += `</select>
+      <select id="attYearSelect" onchange="changeAttendanceMonth()" style="padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;">
+  `;
+  for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) {
+    html += `<option value="${y}" ${y === attendanceYear ? 'selected' : ''}>${y}年</option>`;
+  }
+  html += `</select>
+      <button class="btn btn-primary btn-sm" onclick="loadAttendanceStats()">刷新统计</button>
+    </div>
+  </div>
+  <div id="attendanceStatsContent" style="margin-top:20px;">
+    <p style="text-align:center;color:var(--text-muted);padding:40px;">正在加载统计数据...</p>
+  </div>`;
+
+  container.innerHTML = html;
+  loadAttendanceStats();
+}
+
+function changeAttendanceMonth() {
+  attendanceYear = parseInt(document.getElementById('attYearSelect').value);
+  attendanceMonth = parseInt(document.getElementById('attMonthSelect').value);
+  loadAttendanceStats();
+}
+
+async function loadAttendanceStats() {
+  try {
+    const data = await api(`/api/stats/attendance?year=${attendanceYear}&month=${attendanceMonth}`, 'GET');
+    renderAttendanceStats(data);
+  } catch (e) {
+    document.getElementById('attendanceStatsContent').innerHTML = `<p style="color:var(--danger);">加载失败: ${e.message}</p>`;
+  }
+}
+
+function renderAttendanceStats(data) {
+  const container = document.getElementById('attendanceStatsContent');
+  const stats = data.stats || [];
+
+  // 汇总
+  const totalStudents = stats.length;
+  const activeStudents = stats.filter(s => s.total > 0).length;
+  const avgRate = activeStudents > 0
+    ? Math.round(stats.filter(s => s.total > 0).reduce((sum, s) => sum + s.rate, 0) / activeStudents)
+    : 0;
+  const totalCourses = stats.reduce((sum, s) => sum + s.total, 0);
+  const totalCancelled = stats.reduce((sum, s) => sum + s.cancelled, 0);
+
+  let html = `<div class="stat-cards">
+    <div class="stat-card"><div class="sc-label">活跃学生</div><div class="sc-value primary">${activeStudents}</div></div>
+    <div class="stat-card"><div class="sc-label">本月课程总数</div><div class="sc-value">${totalCourses}</div></div>
+    <div class="stat-card"><div class="sc-label">取消课程</div><div class="sc-value" style="color:var(--danger);">${totalCancelled}</div></div>
+    <div class="stat-card"><div class="sc-label">平均签到率</div><div class="sc-value" style="color:${avgRate >= 80 ? '#30a46c' : avgRate >= 50 ? '#e8a317' : '#e03131'};">${avgRate}%</div></div>
+  </div>
+
+  <div class="page-header" style="margin-top:24px;">
+    <div><h3 style="font-size:16px;">学生签到明细</h3></div>
+  </div>`;
+
+  if (stats.length === 0) {
+    html += '<p style="text-align:center;color:var(--text-muted);padding:40px;">暂无学生数据</p>';
+    container.innerHTML = html;
+    return;
+  }
+
+  // 表格
+  html += `<div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:800px;">
+      <thead>
+        <tr style="background:var(--bg-subtle);border-bottom:2px solid var(--border);">
+          <th style="padding:10px 12px;text-align:left;font-weight:600;">学生</th>
+          <th style="padding:10px 12px;text-align:center;font-weight:600;">已上/正常</th>
+          <th style="padding:10px 12px;text-align:center;font-weight:600;">已上/取消</th>
+          <th style="padding:10px 12px;text-align:center;font-weight:600;">待上课</th>
+          <th style="padding:10px 12px;text-align:center;font-weight:600;">本月合计</th>
+          <th style="padding:10px 12px;text-align:center;font-weight:600;">签到率</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+  stats.forEach(s => {
+    const rateColor = s.rate >= 80 ? '#30a46c' : s.rate >= 50 ? '#e8a317' : '#e03131';
+    const rateBg = s.rate >= 80 ? '#ebfbee' : s.rate >= 50 ? '#fff9db' : '#fde8e8';
+    html += `<tr style="border-bottom:1px solid var(--border);${s.total === 0 ? 'opacity:0.5;' : ''}">
+      <td style="padding:10px 12px;font-weight:500;">${escapeHtml(s.studentName)}</td>
+      <td style="padding:10px 12px;text-align:center;color:#30a46c;font-weight:600;">${s.pastNormal}</td>
+      <td style="padding:10px 12px;text-align:center;color:var(--danger);">${s.pastCancelled}</td>
+      <td style="padding:10px 12px;text-align:center;color:var(--text-muted);">${s.upcoming}</td>
+      <td style="padding:10px 12px;text-align:center;font-weight:600;">${s.total}</td>
+      <td style="padding:10px 12px;text-align:center;">
+        <span style="display:inline-block;padding:3px 10px;border-radius:12px;background:${rateBg};color:${rateColor};font-weight:600;">${s.total > 0 ? s.rate + '%' : '—'}</span>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  container.innerHTML = html;
+}
+
+/* ============================================================
    课程弹窗（新建/编辑）
    ============================================================ */
 function openCourseModal(courseId) {
@@ -1665,6 +1823,14 @@ function openCourseModal(courseId) {
     document.getElementById('courseEnd').value = course.endTime;
     document.getElementById('courseLocation').value = course.location || '';
     document.getElementById('courseTeacher').value = course.teacherId;
+    // 兼职老师：显示输入框并填入名字
+    if (course.teacherId === 'guest') {
+      document.getElementById('guestTeacherContainer').style.display = '';
+      document.getElementById('guestTeacherName').value = course.guestTeacherName || '';
+    } else {
+      document.getElementById('guestTeacherContainer').style.display = 'none';
+      document.getElementById('guestTeacherName').value = '';
+    }
     document.getElementById('courseDesc').value = course.description || '';
     // 编辑时隐藏重复选项（已创建的重复课程单独编辑）
     document.getElementById('repeatGroup').style.display = 'none';
@@ -1690,6 +1856,9 @@ function openCourseModal(courseId) {
     document.getElementById('courseStart').value = '09:00';
     document.getElementById('courseEnd').value = '10:30';
     document.getElementById('courseLocation').value = '';
+    // 新建时隐藏兼职老师输入框
+    document.getElementById('guestTeacherContainer').style.display = 'none';
+    document.getElementById('guestTeacherName').value = '';
     // 新建时显示重复选项
     document.getElementById('repeatGroup').style.display = '';
     document.getElementById('courseRepeat').value = 'none';
@@ -1717,7 +1886,7 @@ function openCourseModal(courseId) {
 
   // 设置表单只读状态
   const editable = courseId ? canEditCourse(DB.courses.find(c => c.id === courseId)) : canCreateCourse();
-  ['courseName','courseDate','courseStart','courseEnd','courseLocation','courseTeacher','courseDesc'].forEach(id => {
+  ['courseName','courseDate','courseStart','courseEnd','courseLocation','courseTeacher','courseDesc','guestTeacherName'].forEach(id => {
     document.getElementById(id).disabled = !editable;
   });
   document.querySelector('.modal-footer .btn-primary').style.display = editable ? '' : 'none';
@@ -1761,11 +1930,29 @@ function updateStatusButtons() {
 }
 
 function updateColorFromTeacher(teacherId) {
-  const teacher = getTeacherById(teacherId);
-  if (teacher) {
-    selectedColor = teacher.color;
-    document.getElementById('colorPreview').style.background = teacher.color;
+  if (teacherId === 'guest') {
+    selectedColor = PART_TIME_COLOR;
+    document.getElementById('colorPreview').style.background = PART_TIME_COLOR;
+  } else {
+    const teacher = getTeacherById(teacherId);
+    if (teacher) {
+      selectedColor = teacher.color;
+      document.getElementById('colorPreview').style.background = teacher.color;
+    }
   }
+}
+
+// 老师选择变化时显示/隐藏兼职老师输入框
+function handleTeacherChange() {
+  const sel = document.getElementById('courseTeacher');
+  const guestContainer = document.getElementById('guestTeacherContainer');
+  if (sel.value === 'guest') {
+    guestContainer.style.display = '';
+  } else {
+    guestContainer.style.display = 'none';
+    document.getElementById('guestTeacherName').value = '';
+  }
+  updateColorFromTeacher(sel.value);
 }
 
 async function saveCourse() {
@@ -1775,6 +1962,7 @@ async function saveCourse() {
   const end = document.getElementById('courseEnd').value;
   const location = document.getElementById('courseLocation').value.trim();
   const teacherId = document.getElementById('courseTeacher').value;
+  const guestTeacherName = document.getElementById('guestTeacherName').value.trim();
   const desc = document.getElementById('courseDesc').value.trim();
   const repeat = document.getElementById('courseRepeat') ? document.getElementById('courseRepeat').value : 'none';
   const studentIds = getSelectedStudentIds();
@@ -1783,6 +1971,7 @@ async function saveCourse() {
   if (!date) { alert('请选择日期'); return; }
   if (!start || !end) { alert('请选择时间'); return; }
   if (!teacherId) { alert('请选择授课老师'); return; }
+  if (teacherId === 'guest' && !guestTeacherName) { alert('请输入兼职老师姓名'); return; }
   if (parseTimeToMinutes(start) >= parseTimeToMinutes(end)) {
     alert('结束时间必须晚于开始时间'); return;
   }
@@ -1811,7 +2000,7 @@ async function saveCourse() {
 
   const data = {
     name, date, startTime: start, endTime: end,
-    location, teacherId, description: desc, repeat, studentIds, status: currentCourseStatus
+    location, teacherId, guestTeacherName, description: desc, repeat, studentIds, status: currentCourseStatus
   };
   if (repeat === 'weekly-weekdays') data.weekdays = weekdays;
 
@@ -1890,12 +2079,13 @@ function exportCSV() {
   const headers = ['课程名称','日期','星期','开始时间','结束时间','地点','授课老师','关联学生','描述','颜色'];
   const rows = list.map(c => {
     const teacher = getTeacherById(c.teacherId);
+    const teacherName = getTeacherDisplayName(c);
     const wd = WEEK_NAMES[dateFromStr(c.date).getDay()];
     const studentNames = (c.studentIds || []).map(sid => {
       const s = DB.students.find(x => x.id === sid);
       return s ? s.name : '';
     }).filter(Boolean).join('、');
-    return [c.name, c.date, wd, c.startTime, c.endTime, c.location || '', teacher ? teacher.name : '', studentNames, c.description || '', c.color];
+    return [c.name, c.date, wd, c.startTime, c.endTime, c.location || '', teacherName, studentNames, c.description || '', c.color];
   });
 
   // CSV with BOM for Excel
@@ -1912,7 +2102,10 @@ function exportCSV() {
   const a = document.createElement('a');
   // 文件名包含筛选信息
   let fileSuffix = '';
-  if (teacherFilter) fileSuffix += '_' + (getTeacherById(teacherFilter) ? getTeacherById(teacherFilter).name : '');
+  if (teacherFilter) {
+    const tName = teacherFilter === 'guest' ? '兼职老师' : (getTeacherById(teacherFilter) ? getTeacherById(teacherFilter).name : '');
+    fileSuffix += '_' + tName;
+  }
   if (studentFilter) fileSuffix += '_' + (DB.students.find(s => s.id === studentFilter) ? DB.students.find(s => s.id === studentFilter).name : '');
   a.download = `排课_${currentView}视图_${rangeLabel}${fileSuffix}.csv`;
   document.body.appendChild(a);
