@@ -20,21 +20,32 @@ const TEACHER_COLORS = ['#3b5bdb','#0c9b9b','#30a46c','#e8833a','#7c4dff','#e843
 function getDefaultDB() {
   return {
     users: [
-      { username: 'admin',     password: 'admin123',    role: 'admin',    name: '\u7ba1\u7406\u5458A' },
-      { username: 'admin2',    password: 'admin123',    role: 'admin',    name: '\u7ba1\u7406\u5458B' },
-      { username: 'scheduler', password: 'scheduler123', role: 'scheduler', name: '\u6392\u8bfe\u4eba' },
-      { username: 'teacher1', password: '123456', role: 'teacher', name: '\u8001\u5e081', teacherIndex: 0 },
-      { username: 'teacher2', password: '123456', role: 'teacher', name: '\u8001\u5e082', teacherIndex: 1 },
-      { username: 'teacher3', password: '123456', role: 'teacher', name: '\u8001\u5e083', teacherIndex: 2 },
-      { username: 'teacher4', password: '123456', role: 'teacher', name: '\u8001\u5e084', teacherIndex: 3 },
-      { username: 'teacher5', password: '123456', role: 'teacher', name: '\u8001\u5e085', teacherIndex: 4 },
-      { username: 'teacher6', password: '123456', role: 'teacher', name: '\u8001\u5e086', teacherIndex: 5 },
-      { username: 'teacher7', password: '123456', role: 'teacher', name: '\u8001\u5e087', teacherIndex: 6 },
-      { username: 'teacher8', password: '123456', role: 'teacher', name: '\u8001\u5e088', teacherIndex: 7 },
+      { username: 'admin',     password: 'admin123',    role: 'admin',    name: '管理员A' },
+      { username: 'admin2',    password: 'admin123',    role: 'admin',    name: '管理员B' },
+      { username: 'scheduler', password: 'scheduler123', role: 'scheduler', name: '排课人' },
+      { username: 'teacher1', password: '123456', role: 'teacher', name: '老师1', teacherIndex: 0 },
+      { username: 'teacher2', password: '123456', role: 'teacher', name: '老师2', teacherIndex: 1 },
+      { username: 'teacher3', password: '123456', role: 'teacher', name: '老师3', teacherIndex: 2 },
+      { username: 'teacher4', password: '123456', role: 'teacher', name: '老师4', teacherIndex: 3 },
+      { username: 'teacher5', password: '123456', role: 'teacher', name: '老师5', teacherIndex: 4 },
+      { username: 'teacher6', password: '123456', role: 'teacher', name: '老师6', teacherIndex: 5 },
+      { username: 'teacher7', password: '123456', role: 'teacher', name: '老师7', teacherIndex: 6 },
+      { username: 'teacher8', password: '123456', role: 'teacher', name: '老师8', teacherIndex: 7 },
     ],
     teachers: [],
+    students: [],
     courses: []
   };
+}
+
+function initStudents(DB) {
+  DB.students = [];
+  for (let i = 1; i <= 50; i++) {
+    DB.students.push({
+      id: 's' + i,
+      name: '学生' + i
+    });
+  }
 }
 
 function getMonday(d) {
@@ -126,6 +137,7 @@ function loadPersisted() {
 if (!loadPersisted()) {
   console.log('no data file, initializing fresh data');
   initTeachers(DB);
+  initStudents(DB);
   initSampleCourses(DB);
   persist();
 }
@@ -208,38 +220,107 @@ app.get('/api/session', (req, res) => {
 app.get('/api/data', authRequired, (req, res) => {
   res.json({
     teachers: DB.teachers,
+    students: DB.students,
     courses: DB.courses,
     currentUser: req.user
   });
 });
 
 app.post('/api/courses', authRequired, (req, res) => {
-  const { name, date, startTime, endTime, location, teacherId, description } = req.body;
+  const { name, date, startTime, endTime, location, teacherId, description, repeat, weekdays, studentIds } = req.body;
   if (!name || !date || !startTime || !endTime || !teacherId) {
     return res.status(400).json({ error: 'missing required fields' });
   }
   const teacher = DB.teachers.find(t => t.id === teacherId);
   const color = teacher ? teacher.color : '#3b5bdb';
-  const course = {
-    id: 'c' + Date.now() + Math.random().toString(36).substr(2, 5),
+  const baseCourse = {
     name, date, startTime, endTime,
     location: location || '',
     teacherId,
     description: description || '',
     color,
-    createdBy: req.user.username
+    createdBy: req.user.username,
+    studentIds: studentIds || [],
+    status: 'normal'
   };
-  DB.courses.push(course);
+
+  // 重复排课：none=仅一次, weekly=每周, biweekly=隔周, weekly-weekdays=按星期几
+  const repeatType = repeat || 'none';
+  const created = [];
+
+  if (repeatType === 'none') {
+    const course = { ...baseCourse, id: 'c' + Date.now() + Math.random().toString(36).substr(2, 5), repeatType: 'none' };
+    DB.courses.push(course);
+    created.push(course);
+  } else if (repeatType === 'weekly-weekdays') {
+    // 按星期几重复：用户选择多个星期几，生成16周内所有对应日期的课程
+    const repeatGroupId = 'r' + Date.now() + Math.random().toString(36).substr(2, 5);
+    const selectedDays = (weekdays || []).map(Number).filter(d => d >= 0 && d <= 6);
+    if (selectedDays.length === 0) {
+      return res.status(400).json({ error: '请至少选择一个星期' });
+    }
+    const totalWeeks = 16;
+    for (let w = 0; w < totalWeeks; w++) {
+      for (const wd of selectedDays) {
+        const courseDate = getDateForWeekday(date, wd, w);
+        const course = {
+          ...baseCourse,
+          id: 'c' + Date.now() + '_w' + w + '_d' + wd + Math.random().toString(36).substr(2, 3),
+          date: courseDate,
+          repeatType: 'weekly-weekdays',
+          repeatGroupId
+        };
+        DB.courses.push(course);
+        created.push(course);
+      }
+    }
+  } else {
+    // 每周或隔周，生成16周的课程
+    const repeatGroupId = 'r' + Date.now() + Math.random().toString(36).substr(2, 5);
+    const interval = repeatType === 'weekly' ? 7 : 14;
+    const totalWeeks = repeatType === 'biweekly' ? 8 : 16;
+
+    for (let i = 0; i < totalWeeks; i++) {
+      const courseDate = addDays(date, i * interval);
+      const course = {
+        ...baseCourse,
+        id: 'c' + Date.now() + '_' + i + Math.random().toString(36).substr(2, 3),
+        date: courseDate,
+        repeatType,
+        repeatGroupId
+      };
+      DB.courses.push(course);
+      created.push(course);
+    }
+  }
+
   persist();
-  io.emit('course_created', course);
-  res.json(course);
+  created.forEach(c => io.emit('course_created', c));
+  res.json(created.length === 1 ? created[0] : { created: created.length, courses: created });
 });
+
+// 辅助：日期加N天
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// 辅助：获取基准日期后第N周、星期几对应的日期
+// weekday: 0=周日, 1=周一, ..., 6=周六
+function getDateForWeekday(baseDateStr, weekday, weekOffset) {
+  const base = new Date(baseDateStr + 'T00:00:00');
+  const baseMonday = getMonday(base);
+  const target = new Date(baseMonday);
+  target.setDate(target.getDate() + weekOffset * 7 + (weekday === 0 ? 6 : weekday - 1));
+  return target.getFullYear() + '-' + String(target.getMonth() + 1).padStart(2, '0') + '-' + String(target.getDate()).padStart(2, '0');
+}
 
 app.put('/api/courses/:id', authRequired, (req, res) => {
   const course = DB.courses.find(c => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'course not found' });
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
-  const { name, date, startTime, endTime, location, teacherId, description } = req.body;
+  const { name, date, startTime, endTime, location, teacherId, description, studentIds, status } = req.body;
   const teacher = DB.teachers.find(t => t.id === (teacherId || course.teacherId));
   Object.assign(course, {
     name: name || course.name,
@@ -249,7 +330,9 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
     location: location !== undefined ? location : course.location,
     teacherId: teacherId || course.teacherId,
     description: description !== undefined ? description : course.description,
-    color: teacher ? teacher.color : course.color
+    color: teacher ? teacher.color : course.color,
+    studentIds: studentIds !== undefined ? studentIds : (course.studentIds || []),
+    status: status !== undefined ? status : (course.status || 'normal')
   });
   persist();
   io.emit('course_updated', course);
@@ -260,10 +343,22 @@ app.delete('/api/courses/:id', authRequired, (req, res) => {
   const course = DB.courses.find(c => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'course not found' });
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
-  DB.courses = DB.courses.filter(c => c.id !== req.params.id);
-  persist();
-  io.emit('course_deleted', { id: req.params.id });
-  res.json({ ok: true });
+  const deleteAll = req.query.all === '1' && course.repeatGroupId;
+  if (deleteAll) {
+    // 删除同一重复组的所有课程
+    const groupId = course.repeatGroupId;
+    const toDelete = DB.courses.filter(c => c.repeatGroupId === groupId);
+    const deleteIds = toDelete.map(c => c.id);
+    DB.courses = DB.courses.filter(c => c.repeatGroupId !== groupId);
+    persist();
+    deleteIds.forEach(id => io.emit('course_deleted', { id }));
+    res.json({ ok: true, deleted: deleteIds.length });
+  } else {
+    DB.courses = DB.courses.filter(c => c.id !== req.params.id);
+    persist();
+    io.emit('course_deleted', { id: req.params.id });
+    res.json({ ok: true });
+  }
 });
 
 app.get('/api/teachers', authRequired, (req, res) => {
@@ -294,6 +389,58 @@ app.put('/api/teachers/:id', authRequired, (req, res) => {
   res.json(teacher);
 });
 
+/* ---------- 学生管理 API ---------- */
+app.get('/api/students', authRequired, (req, res) => {
+  res.json(DB.students);
+});
+
+app.post('/api/students', authRequired, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  const { name } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: '学生姓名不能为空' });
+  }
+  const student = {
+    id: 's' + Date.now() + Math.random().toString(36).substr(2, 4),
+    name: name.trim()
+  };
+  DB.students.push(student);
+  persist();
+  io.emit('student_updated', student);
+  res.json(student);
+});
+
+app.put('/api/students/:id', authRequired, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  const student = DB.students.find(s => s.id === req.params.id);
+  if (!student) return res.status(404).json({ error: 'student not found' });
+  const { name } = req.body;
+  if (name) student.name = name.trim();
+  persist();
+  io.emit('student_updated', student);
+  res.json(student);
+});
+
+app.delete('/api/students/:id', authRequired, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  DB.students = DB.students.filter(s => s.id !== req.params.id);
+  // 从课程中移除该学生
+  DB.courses.forEach(c => {
+    if (c.studentIds) {
+      c.studentIds = c.studentIds.filter(id => id !== req.params.id);
+    }
+  });
+  persist();
+  io.emit('student_deleted', { id: req.params.id });
+  res.json({ ok: true });
+});
+
 // Reset all data (admin only)
 app.post('/api/reset', authRequired, (req, res) => {
   if (req.user.role !== 'admin') {
@@ -306,10 +453,11 @@ app.post('/api/reset', authRequired, (req, res) => {
   } catch (e) {}
   DB = getDefaultDB();
   initTeachers(DB);
+  initStudents(DB);
   initSampleCourses(DB);
   persist();
-  io.emit('data_reset', { teachers: DB.teachers, courses: DB.courses });
-  res.json({ ok: true, teachers: DB.teachers, courses: DB.courses });
+  io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
+  res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses });
 });
 
 function canEditCourse(user, course) {

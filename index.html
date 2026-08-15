@@ -385,6 +385,7 @@ a { color: var(--primary); text-decoration: none; }
       <div class="topbar-spacer"></div>
       <div class="toolbar-group" id="calendarToolbar">
         <select class="filter-select" id="teacherFilter" onchange="renderCurrentView()" title="按老师筛选"><option value="">全部老师</option></select>
+        <select class="filter-select" id="studentFilter" onchange="renderCurrentView()" title="按学生筛选"><option value="">全部学生</option></select>
         <div class="date-nav">
           <button class="btn-icon" onclick="navigateDate(-1)" title="上一个">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
@@ -577,10 +578,46 @@ a { color: var(--primary); text-decoration: none; }
         <label>描述</label>
         <textarea id="courseDesc" rows="3" placeholder="课程描述（选填）" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);outline:none;resize:vertical;"></textarea>
       </div>
+      <div class="form-group" id="repeatGroup">
+        <label>重复方式</label>
+        <select id="courseRepeat" onchange="onRepeatChange()">
+          <option value="none">仅一次</option>
+          <option value="weekly">每周重复（16周）</option>
+          <option value="biweekly">隔周一次（8次）</option>
+          <option value="weekly-weekdays">按星期几重复</option>
+        </select>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" id="repeatHint">选择「每周重复」将自动生成16周的课程</div>
+        <div id="weekdayPicker" style="display:none;margin-top:8px;flex-wrap:wrap;gap:6px;">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="1" style="width:auto;"> 周一</label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="2" style="width:auto;"> 周二</label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="3" style="width:auto;"> 周三</label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="4" style="width:auto;"> 周四</label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="5" style="width:auto;"> 周五</label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="6" style="width:auto;"> 周六</label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;"><input type="checkbox" value="0" style="width:auto;"> 周日</label>
+        </div>
+      </div>
+      <div class="form-group" id="studentGroup">
+        <label>关联学生（选填）</label>
+        <input type="text" id="studentSearch" placeholder="输入姓名搜索..." autocomplete="off"
+          oninput="filterStudentResults()" onfocus="showStudentResults()" onblur="setTimeout(()=>hideStudentResults(),200)"
+          style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:4px;">
+        <div id="studentSearchResults" style="display:none;position:absolute;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow);max-height:200px;overflow-y:auto;z-index:100;width:calc(100% - 24px);"></div>
+        <div id="selectedStudentsTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;min-height:8px;"></div>
+      </div>
       <div class="form-group">
         <div class="color-label-row">
           颜色标签（自动绑定授课老师）
           <span class="color-preview-dot" id="colorPreview" style="background:#3b5bdb;"></span>
+        </div>
+      </div>
+      <div class="form-group" id="statusGroup" style="display:none;">
+        <label>课程状态</label>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn btn-sm" id="statusNormalBtn" onclick="setCourseStatus('normal')"
+            style="flex:1;border-color:#30a46c;color:#30a46c;">正常</button>
+          <button type="button" class="btn btn-sm" id="statusCancelledBtn" onclick="setCourseStatus('cancelled')"
+            style="flex:1;border-color:#9097a8;color:#9097a8;">已取消</button>
         </div>
       </div>
     </div>
@@ -642,6 +679,7 @@ async function loadData() {
   try {
     const data = await api('/api/data');
     DB.teachers = data.teachers || [];
+    DB.students = data.students || [];
     DB.courses = data.courses || [];
   } catch (e) {
     console.error('数据加载失败', e);
@@ -703,11 +741,35 @@ function initSocket() {
 
   socket.on('data_reset', (data) => {
     DB.teachers = data.teachers || [];
+    DB.students = data.students || [];
     DB.courses = data.courses || [];
     initTeacherFilter();
+    initStudentFilter();
     initTeacherSelect();
     renderCurrentView();
     if (currentPage === 'teachers') renderTeachersPage();
+    if (currentPage === 'settings') renderSettingsPage();
+  });
+
+  socket.on('student_updated', (student) => {
+    const idx = DB.students.findIndex(s => s.id === student.id);
+    if (idx >= 0) {
+      DB.students[idx] = student;
+    } else {
+      DB.students.push(student);
+    }
+    initStudentFilter();
+    renderCurrentView();
+    if (currentPage === 'settings') renderSettingsPage();
+  });
+
+  socket.on('student_deleted', (data) => {
+    DB.students = DB.students.filter(s => s.id !== data.id);
+    DB.courses.forEach(c => {
+      if (c.studentIds) c.studentIds = c.studentIds.filter(id => id !== data.id);
+    });
+    initStudentFilter();
+    renderCurrentView();
     if (currentPage === 'settings') renderSettingsPage();
   });
 }
@@ -753,6 +815,7 @@ function enterApp() {
   document.getElementById('appView').classList.add('active');
   renderUserInfo();
   initTeacherFilter();
+  initStudentFilter();
   initTeacherSelect();
   applyPermission();
   switchView(currentView);
@@ -872,6 +935,117 @@ function initTeacherFilter() {
   }
 }
 
+function initStudentFilter() {
+  const sel = document.getElementById('studentFilter');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">全部学生</option>';
+  DB.students.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+}
+
+let selectedStudentIds = []; // 当前选中关联的学生ID列表
+
+function initStudentList(selectedIds) {
+  selectedStudentIds = (selectedIds || []).slice();
+  const searchInput = document.getElementById('studentSearch');
+  if (searchInput) searchInput.value = '';
+  renderSelectedStudentTags();
+  if (document.activeElement === searchInput) {
+    filterStudentResults();
+  }
+}
+
+function renderSelectedStudentTags() {
+  const container = document.getElementById('selectedStudentsTags');
+  if (!container) return;
+  container.innerHTML = '';
+  selectedStudentIds.forEach(sid => {
+    const student = DB.students.find(s => s.id === sid);
+    if (!student) return;
+    const tag = document.createElement('span');
+    tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#eef1fd;color:#2b44a8;border-radius:12px;font-size:12px;';
+    tag.textContent = student.name;
+    const removeBtn = document.createElement('span');
+    removeBtn.textContent = '×';
+    removeBtn.style.cssText = 'cursor:pointer;font-weight:bold;margin-left:2px;';
+    removeBtn.onclick = function() {
+      selectedStudentIds = selectedStudentIds.filter(id => id !== sid);
+      renderSelectedStudentTags();
+      filterStudentResults();
+    };
+    tag.appendChild(removeBtn);
+    container.appendChild(tag);
+  });
+}
+
+function showStudentResults() {
+  filterStudentResults();
+  document.getElementById('studentSearchResults').style.display = '';
+}
+
+function hideStudentResults() {
+  document.getElementById('studentSearchResults').style.display = 'none';
+}
+
+function filterStudentResults() {
+  const results = document.getElementById('studentSearchResults');
+  const query = (document.getElementById('studentSearch').value || '').trim().toLowerCase();
+  let list = DB.students.filter(s => !selectedStudentIds.includes(s.id));
+  if (query) {
+    list = list.filter(s => s.name.toLowerCase().includes(query) || s.id.toLowerCase().includes(query));
+  }
+  // 最多显示50条
+  list = list.slice(0, 50);
+  results.innerHTML = '';
+  if (list.length === 0) {
+    results.innerHTML = '<div style="padding:8px 12px;color:var(--text-muted);font-size:13px;">无匹配学生</div>';
+  } else {
+    list.forEach(s => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border-light);';
+      item.textContent = s.name;
+      item.onmousedown = function(e) {
+        e.preventDefault();
+        selectedStudentIds.push(s.id);
+        document.getElementById('studentSearch').value = '';
+        renderSelectedStudentTags();
+        filterStudentResults();
+      };
+      item.onmouseover = function() { this.style.background = '#eef1fd'; };
+      item.onmouseout = function() { this.style.background = ''; };
+      results.appendChild(item);
+    });
+  }
+  results.style.display = '';
+}
+
+function onRepeatChange() {
+  const val = document.getElementById('courseRepeat').value;
+  const picker = document.getElementById('weekdayPicker');
+  const hint = document.getElementById('repeatHint');
+  if (val === 'weekly-weekdays') {
+    picker.style.display = 'flex';
+    hint.textContent = '选择星期几，自动生成16周内所有对应日期的课程';
+  } else {
+    picker.style.display = 'none';
+    hint.textContent = val === 'none' ? '选择「每周重复」将自动生成16周的课程' :
+      val === 'weekly' ? '每周同一天，共16周' : '隔周一次，共8次';
+  }
+}
+
+function getSelectedWeekdays() {
+  const checks = document.querySelectorAll('#weekdayPicker input[type=checkbox]:checked');
+  return Array.from(checks).map(c => parseInt(c.value));
+}
+
+function getSelectedStudentIds() {
+  return selectedStudentIds.slice();
+}
+
 function initTeacherSelect() {
   const sel = document.getElementById('courseTeacher');
   sel.innerHTML = '';
@@ -884,9 +1058,11 @@ function initTeacherSelect() {
 }
 
 function getFilteredCourses() {
-  const filter = document.getElementById('teacherFilter').value;
+  const teacherFilter = document.getElementById('teacherFilter').value;
+  const studentFilter = document.getElementById('studentFilter') ? document.getElementById('studentFilter').value : '';
   let list = DB.courses.slice();
-  if (filter) list = list.filter(c => c.teacherId === filter);
+  if (teacherFilter) list = list.filter(c => c.teacherId === teacherFilter);
+  if (studentFilter) list = list.filter(c => c.studentIds && c.studentIds.includes(studentFilter));
   return list;
 }
 
@@ -959,6 +1135,13 @@ function getTeacherById(id) {
   return DB.teachers.find(t => t.id === id);
 }
 
+function getRepeatBadge(course) {
+  if (course.repeatType === 'weekly') return '<span style="font-size:10px;background:rgba(59,91,219,.12);color:#2b44a8;padding:1px 5px;border-radius:3px;margin-left:4px;white-space:nowrap;">每周</span>';
+  if (course.repeatType === 'biweekly') return '<span style="font-size:10px;background:rgba(124,77,255,.12);color:#5b2ad6;padding:1px 5px;border-radius:3px;margin-left:4px;white-space:nowrap;">隔周</span>';
+  if (course.repeatType === 'weekly-weekdays') return '<span style="font-size:10px;background:rgba(48,164,108,.12);color:#1d7a4d;padding:1px 5px;border-radius:3px;margin-left:4px;white-space:nowrap;">固定</span>';
+  return '';
+}
+
 /* ============================================================
    日视图
    ============================================================ */
@@ -1029,11 +1212,15 @@ function renderDayView() {
     const cmeta = getColorMeta(c.color);
     const teacher = getTeacherById(c.teacherId);
     const canEdit = canEditCourse(c);
+    const isCancelled = c.status === 'cancelled';
+    const cardBg = isCancelled ? '#f0f0f3' : cmeta.bg;
+    const cardText = isCancelled ? '#9097a8' : cmeta.text;
+    const cardBorder = isCancelled ? '#c0c4cc' : c.color;
     html += `<div class="course-card ${height < 40 ? 'compact' : ''}" 
       style="top:${top}px;height:${height}px;left:${leftPct}%;width:calc(${widthPct}% - 6px);
-      border-left-color:${c.color};background:${cmeta.bg};"
+      border-left-color:${cardBorder};background:${cardBg};${isCancelled ? 'opacity:0.7;' : ''}"
       onclick="openCourseModal('${c.id}')" title="${canEdit ? '点击编辑' : '点击查看'}">
-      <div class="cc-title" style="color:${cmeta.text};">${escapeHtml(c.name)}</div>
+      <div class="cc-title" style="color:${cardText};${isCancelled ? 'text-decoration:line-through;' : ''}">${escapeHtml(c.name)}${isCancelled ? '<span style="font-size:10px;background:#9097a8;color:#fff;padding:1px 4px;border-radius:3px;margin-left:4px;">取消</span>' : getRepeatBadge(c)}</div>
       <div class="cc-meta">${c.startTime}-${c.endTime}${teacher ? ' · ' + escapeHtml(teacher.name) : ''}</div>
       ${height >= 56 && c.location ? `<div class="cc-meta">${escapeHtml(c.location)}</div>` : ''}
     </div>`;
@@ -1106,11 +1293,15 @@ function renderWeekView() {
       const leftPct = col * widthPct;
       const cmeta = getColorMeta(c.color);
       const teacher = getTeacherById(c.teacherId);
+      const isCancelled = c.status === 'cancelled';
+      const cardBg = isCancelled ? '#f0f0f3' : cmeta.bg;
+      const cardText = isCancelled ? '#9097a8' : cmeta.text;
+      const cardBorder = isCancelled ? '#c0c4cc' : c.color;
       html += `<div class="course-card ${height < 36 ? 'compact' : ''}"
         style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${widthPct}% - 4px);
-        border-left-color:${c.color};background:${cmeta.bg};"
+        border-left-color:${cardBorder};background:${cardBg};${isCancelled ? 'opacity:0.7;' : ''}"
         onclick="openCourseModal('${c.id}')">
-        <div class="cc-title" style="color:${cmeta.text};">${escapeHtml(c.name)}</div>
+        <div class="cc-title" style="color:${cardText};${isCancelled ? 'text-decoration:line-through;' : ''}">${escapeHtml(c.name)}${isCancelled ? '<span style="font-size:10px;background:#9097a8;color:#fff;padding:1px 4px;border-radius:3px;margin-left:4px;">取消</span>' : getRepeatBadge(c)}</div>
         <div class="cc-meta">${c.startTime}-${c.endTime}${teacher ? ' '+escapeHtml(teacher.name) : ''}</div>
         ${height >= 50 && c.location ? `<div class="cc-meta">${escapeHtml(c.location)}</div>` : ''}
       </div>`;
@@ -1172,9 +1363,13 @@ function renderMonthView() {
       <div class="mc-date">${cell.date.getDate()}</div>`;
     dayCourses.slice(0, MAX_EVENTS_PER_CELL).forEach(c => {
       const cmeta = getColorMeta(c.color);
-      html += `<div class="month-event" style="border-left-color:${c.color};background:${cmeta.bg};color:${cmeta.text};"
+      const isCancelled = c.status === 'cancelled';
+      const eBg = isCancelled ? '#f0f0f3' : cmeta.bg;
+      const eText = isCancelled ? '#9097a8' : cmeta.text;
+      const eBorder = isCancelled ? '#c0c4cc' : c.color;
+      html += `<div class="month-event" style="border-left-color:${eBorder};background:${eBg};color:${eText};${isCancelled ? 'text-decoration:line-through;opacity:0.7;' : ''}"
         onclick="event.stopPropagation();openCourseModal('${c.id}')" title="${escapeHtml(c.name)} ${c.startTime}-${c.endTime}">
-        ${c.startTime} ${escapeHtml(c.name)}
+        ${c.startTime} ${escapeHtml(c.name)}${isCancelled ? '<span style="font-size:9px;background:#9097a8;color:#fff;padding:0 3px;border-radius:2px;margin-left:2px;">取消</span>' : getRepeatBadge(c)}
       </div>`;
     });
     if (dayCourses.length > MAX_EVENTS_PER_CELL) {
@@ -1268,12 +1463,13 @@ function renderSettingsPage() {
   let html = `<div class="page-header">
     <div>
       <h2>设置</h2>
-      <div class="page-desc">在这里修改老师姓名、颜色，修改后立即同步给所有用户</div>
+      <div class="page-desc">在这里修改老师姓名、颜色，管理学生名单，修改后立即同步给所有用户</div>
     </div>
   </div>
 
   <div class="stat-cards">
     <div class="stat-card"><div class="sc-label">老师总数</div><div class="sc-value primary">${DB.teachers.length}</div></div>
+    <div class="stat-card"><div class="sc-label">学生总数</div><div class="sc-value primary">${DB.students.length}</div></div>
     <div class="stat-card"><div class="sc-label">课程总数</div><div class="sc-value">${DB.courses.length}</div></div>
   </div>
 
@@ -1302,6 +1498,16 @@ function renderSettingsPage() {
   html += `</div>
 
   <div class="page-header" style="margin-top:32px;">
+    <div><h3 style="font-size:16px;">学生名单</h3></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="settingsStudentSearch" placeholder="搜索学生..." oninput="renderStudentList()" style="padding:5px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;width:160px;">
+      <button class="btn btn-primary btn-sm" onclick="addStudentInline()">+ 添加</button>
+    </div>
+  </div>
+
+  <div id="studentListContainer"></div>
+
+  <div class="page-header" style="margin-top:32px;">
     <div><h3 style="font-size:16px;color:var(--danger);">危险操作</h3></div>
   </div>
   <div style="background:#fef0f0;border:1px solid #f0c9cb;border-radius:8px;padding:20px;">
@@ -1310,6 +1516,74 @@ function renderSettingsPage() {
   </div>`;
 
   container.innerHTML = html;
+  renderStudentList();
+}
+
+function renderStudentList() {
+  const container = document.getElementById('studentListContainer');
+  if (!container) return;
+  const searchEl = document.getElementById('settingsStudentSearch');
+  const query = (searchEl ? searchEl.value : '').trim().toLowerCase();
+  let list = DB.students;
+  if (query) {
+    list = list.filter(s => s.name.toLowerCase().includes(query));
+  }
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">';
+  list.forEach(s => {
+    const courseCount = DB.courses.filter(c => c.studentIds && c.studentIds.includes(s.id)).length;
+    html += `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;cursor:pointer;" onclick="editStudentInline('${s.id}')">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#6c8eef;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;">${s.name.charAt(s.name.length-1)}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);">${courseCount} 节课</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:6px;">
+        <button class="btn btn-sm" style="flex:1;padding:3px;">改名</button>
+        <button class="btn btn-sm btn-danger" style="padding:3px 6px;" onclick="event.stopPropagation();deleteStudent('${s.id}','${escapeHtml(s.name)}')">删</button>
+      </div>
+    </div>`;
+  });
+  if (list.length === 0) {
+    html += '<div style="grid-column:1/-1;text-align:center;padding:24px;color:var(--text-muted);">无匹配学生</div>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+/* ---------- 学生管理（内联编辑） ---------- */
+async function addStudentInline() {
+  const name = prompt('请输入学生姓名');
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/students', 'POST', { name: name.trim() });
+  } catch (e) {
+    alert(e.message || '添加失败');
+  }
+}
+
+async function editStudentInline(studentId) {
+  const student = DB.students.find(s => s.id === studentId);
+  if (!student) return;
+  const name = prompt('修改学生姓名', student.name);
+  if (name === null) return;
+  if (!name.trim()) { alert('姓名不能为空'); return; }
+  try {
+    await api('/api/students/' + studentId, 'PUT', { name: name.trim() });
+  } catch (e) {
+    alert(e.message || '修改失败');
+  }
+}
+
+async function deleteStudent(studentId, studentName) {
+  if (!confirm(`确定删除学生「${studentName}」吗？\n该学生将从所有关联课程中移除。`)) return;
+  try {
+    await api('/api/students/' + studentId, 'DELETE');
+  } catch (e) {
+    alert(e.message || '删除失败');
+  }
 }
 
 let editingTeacherId = null;
@@ -1390,6 +1664,15 @@ function openCourseModal(courseId) {
     document.getElementById('courseLocation').value = course.location || '';
     document.getElementById('courseTeacher').value = course.teacherId;
     document.getElementById('courseDesc').value = course.description || '';
+    // 编辑时隐藏重复选项（已创建的重复课程单独编辑）
+    document.getElementById('repeatGroup').style.display = 'none';
+    // 编辑时显示关联学生
+    document.getElementById('studentGroup').style.display = '';
+    initStudentList(course.studentIds || []);
+    // 编辑时显示课程状态
+    document.getElementById('statusGroup').style.display = '';
+    currentCourseStatus = course.status || 'normal';
+    updateStatusButtons();
     updateColorFromTeacher(course.teacherId);
   } else {
     if (!canCreateCourse()) {
@@ -1405,6 +1688,17 @@ function openCourseModal(courseId) {
     document.getElementById('courseStart').value = '09:00';
     document.getElementById('courseEnd').value = '10:30';
     document.getElementById('courseLocation').value = '';
+    // 新建时显示重复选项
+    document.getElementById('repeatGroup').style.display = '';
+    document.getElementById('courseRepeat').value = 'none';
+    document.getElementById('weekdayPicker').style.display = 'none';
+    document.getElementById('repeatHint').textContent = '选择「每周重复」将自动生成16周的课程';
+    // 新建时显示关联学生
+    document.getElementById('studentGroup').style.display = '';
+    initStudentList([]);
+    // 新建时不显示课程状态（默认 normal）
+    document.getElementById('statusGroup').style.display = 'none';
+    currentCourseStatus = 'normal';
     // 老师创建课程时默认分配给自己，排课人/管理员用筛选值
     let defaultTeacherId;
     if (currentUser.role === 'teacher') {
@@ -1432,6 +1726,36 @@ function openCourseModal(courseId) {
 function closeCourseModal() {
   document.getElementById('courseModal').classList.remove('active');
   editingCourseId = null;
+  currentCourseStatus = 'normal';
+}
+
+/* ---------- 课程状态管理 ---------- */
+let currentCourseStatus = 'normal';
+
+function setCourseStatus(status) {
+  currentCourseStatus = status;
+  updateStatusButtons();
+}
+
+function updateStatusButtons() {
+  const normalBtn = document.getElementById('statusNormalBtn');
+  const cancelledBtn = document.getElementById('statusCancelledBtn');
+  if (!normalBtn || !cancelledBtn) return;
+  if (currentCourseStatus === 'cancelled') {
+    normalBtn.style.background = '';
+    normalBtn.style.color = '#30a46c';
+    normalBtn.style.borderColor = '#30a46c';
+    cancelledBtn.style.background = '#9097a8';
+    cancelledBtn.style.color = '#fff';
+    cancelledBtn.style.borderColor = '#9097a8';
+  } else {
+    normalBtn.style.background = '#30a46c';
+    normalBtn.style.color = '#fff';
+    normalBtn.style.borderColor = '#30a46c';
+    cancelledBtn.style.background = '';
+    cancelledBtn.style.color = '#9097a8';
+    cancelledBtn.style.borderColor = '#9097a8';
+  }
 }
 
 function updateColorFromTeacher(teacherId) {
@@ -1450,6 +1774,8 @@ async function saveCourse() {
   const location = document.getElementById('courseLocation').value.trim();
   const teacherId = document.getElementById('courseTeacher').value;
   const desc = document.getElementById('courseDesc').value.trim();
+  const repeat = document.getElementById('courseRepeat') ? document.getElementById('courseRepeat').value : 'none';
+  const studentIds = getSelectedStudentIds();
 
   if (!name) { alert('请输入课程名称'); return; }
   if (!date) { alert('请选择日期'); return; }
@@ -1459,10 +1785,33 @@ async function saveCourse() {
     alert('结束时间必须晚于开始时间'); return;
   }
 
+  // 按星期几重复时验证选择
+  let weekdays = [];
+  if (!editingCourseId && repeat === 'weekly-weekdays') {
+    weekdays = getSelectedWeekdays();
+    if (weekdays.length === 0) {
+      alert('请至少选择一个星期'); return;
+    }
+  }
+
+  // 重复排课确认
+  if (!editingCourseId && repeat !== 'none') {
+    let repeatText;
+    if (repeat === 'weekly') repeatText = '每周重复，共16周';
+    else if (repeat === 'biweekly') repeatText = '隔周一次，共8次';
+    else if (repeat === 'weekly-weekdays') {
+      const names = weekdays.map(w => WEEK_NAMES[w]);
+      const count = weekdays.length * 16;
+      repeatText = `每周${names.join('、')}，共${count}节`;
+    }
+    if (!confirm(`将创建${repeatText}的课程，确认吗？`)) return;
+  }
+
   const data = {
     name, date, startTime: start, endTime: end,
-    location, teacherId, description: desc
+    location, teacherId, description: desc, repeat, studentIds, status: currentCourseStatus
   };
+  if (repeat === 'weekly-weekdays') data.weekdays = weekdays;
 
   try {
     if (editingCourseId) {
@@ -1481,6 +1830,24 @@ async function deleteCurrentCourse() {
   if (!editingCourseId) return;
   const course = DB.courses.find(c => c.id === editingCourseId);
   if (!course) return;
+  
+  // 如果是重复课程，提供删除选项
+  if (course.repeatGroupId) {
+    const choice = confirm(`这是重复排课的课程。\n\n点击「确定」删除此课程及其所有重复项（全部周次）\n点击「取消」仅删除这一次`);
+    try {
+      if (choice) {
+        await api('/api/courses/' + editingCourseId + '?all=1', 'DELETE');
+      } else {
+        if (!confirm(`确定仅删除这一次「${course.name}」吗？`)) return;
+        await api('/api/courses/' + editingCourseId, 'DELETE');
+      }
+      closeCourseModal();
+    } catch (e) {
+      alert(e.message || '删除失败');
+    }
+    return;
+  }
+  
   if (!confirm(`确定删除课程「${course.name}」吗？`)) return;
   try {
     await api('/api/courses/' + editingCourseId, 'DELETE');
@@ -1511,16 +1878,22 @@ function exportCSV() {
 
   const startStr = formatDateStr(startDate);
   const endStr = formatDateStr(endDate);
-  const filter = document.getElementById('teacherFilter').value;
+  const teacherFilter = document.getElementById('teacherFilter').value;
+  const studentFilter = document.getElementById('studentFilter') ? document.getElementById('studentFilter').value : '';
   let list = DB.courses.filter(c => c.date >= startStr && c.date <= endStr);
-  if (filter) list = list.filter(c => c.teacherId === filter);
+  if (teacherFilter) list = list.filter(c => c.teacherId === teacherFilter);
+  if (studentFilter) list = list.filter(c => c.studentIds && c.studentIds.includes(studentFilter));
   list.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
 
-  const headers = ['课程名称','日期','星期','开始时间','结束时间','地点','授课老师','描述','颜色'];
+  const headers = ['课程名称','日期','星期','开始时间','结束时间','地点','授课老师','关联学生','描述','颜色'];
   const rows = list.map(c => {
     const teacher = getTeacherById(c.teacherId);
     const wd = WEEK_NAMES[dateFromStr(c.date).getDay()];
-    return [c.name, c.date, wd, c.startTime, c.endTime, c.location || '', teacher ? teacher.name : '', c.description || '', c.color];
+    const studentNames = (c.studentIds || []).map(sid => {
+      const s = DB.students.find(x => x.id === sid);
+      return s ? s.name : '';
+    }).filter(Boolean).join('、');
+    return [c.name, c.date, wd, c.startTime, c.endTime, c.location || '', teacher ? teacher.name : '', studentNames, c.description || '', c.color];
   });
 
   // CSV with BOM for Excel
@@ -1535,8 +1908,11 @@ function exportCSV() {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = `排课_${currentView}视图_${rangeLabel}.csv`;
+  // 文件名包含筛选信息
+  let fileSuffix = '';
+  if (teacherFilter) fileSuffix += '_' + (getTeacherById(teacherFilter) ? getTeacherById(teacherFilter).name : '');
+  if (studentFilter) fileSuffix += '_' + (DB.students.find(s => s.id === studentFilter) ? DB.students.find(s => s.id === studentFilter).name : '');
+  a.download = `排课_${currentView}视图_${rangeLabel}${fileSuffix}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
