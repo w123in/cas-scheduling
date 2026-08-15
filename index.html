@@ -1085,6 +1085,8 @@ function initTeacherSelect() {
   guestOpt.value = 'guest';
   guestOpt.textContent = '兼职老师（手动输入）';
   sel.appendChild(guestOpt);
+  // 确保 onchange 事件已绑定（不依赖 HTML onchange 属性）
+  sel.onchange = handleTeacherChange;
 }
 
 function getFilteredCourses() {
@@ -1825,7 +1827,7 @@ function openCourseModal(courseId) {
     document.getElementById('courseTeacher').value = course.teacherId;
     // 兼职老师：显示输入框并填入名字
     if (course.teacherId === 'guest') {
-      document.getElementById('guestTeacherContainer').style.display = '';
+      document.getElementById('guestTeacherContainer').style.display = 'block';
       document.getElementById('guestTeacherName').value = course.guestTeacherName || '';
     } else {
       document.getElementById('guestTeacherContainer').style.display = 'none';
@@ -1946,11 +1948,14 @@ function updateColorFromTeacher(teacherId) {
 function handleTeacherChange() {
   const sel = document.getElementById('courseTeacher');
   const guestContainer = document.getElementById('guestTeacherContainer');
+  const guestInput = document.getElementById('guestTeacherName');
   if (sel.value === 'guest') {
-    guestContainer.style.display = '';
+    guestContainer.style.display = 'block';
+    // 确保输入框可用状态与下拉框一致
+    guestInput.disabled = sel.disabled;
   } else {
     guestContainer.style.display = 'none';
-    document.getElementById('guestTeacherName').value = '';
+    guestInput.value = '';
   }
   updateColorFromTeacher(sel.value);
 }
