@@ -598,12 +598,14 @@ a { color: var(--primary); text-decoration: none; }
         </div>
       </div>
       <div class="form-group" id="studentGroup">
-        <label>关联学生（选填）</label>
-        <input type="text" id="studentSearch" placeholder="输入姓名搜索..." autocomplete="off"
-          oninput="filterStudentResults()" onfocus="showStudentResults()" onblur="setTimeout(()=>hideStudentResults(),200)"
-          style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:4px;">
-        <div id="studentSearchResults" style="display:none;position:absolute;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow);max-height:200px;overflow-y:auto;z-index:100;width:calc(100% - 24px);"></div>
-        <div id="selectedStudentsTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;min-height:8px;"></div>
+        <label>关联学生</label>
+        <div style="position:relative;" id="studentSearchWrapper">
+          <input type="text" id="studentSearch" placeholder="输入姓名搜索学生..." autocomplete="off"
+            oninput="filterStudentResults()" onfocus="showStudentResults()" onblur="setTimeout(()=>hideStudentResults(),200)"
+            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);outline:none;">
+        </div>
+        <div id="studentSearchResults" style="display:none;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 2px 8px rgba(0,0,0,0.1);max-height:180px;overflow-y:auto;z-index:100;background:#fff;margin-top:2px;"></div>
+        <div id="selectedStudentsTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;min-height:8px;"></div>
       </div>
       <div class="form-group">
         <div class="color-label-row">
