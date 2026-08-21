@@ -330,6 +330,14 @@ a { color: var(--primary); text-decoration: none; }
 .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 90; }
 .sidebar-backdrop.active { display: block; }
 
+/* 时间模式切换按钮 */
+.time-mode-btn {
+  font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px;
+  background: #f5f6fa; color: var(--text-secondary); cursor: pointer; margin-left: 6px;
+  font-weight: 400; transition: all .15s;
+}
+.time-mode-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+
 /* 导出下拉菜单 */
 .export-dropdown { position: relative; display: inline-block; }
 .export-menu {
@@ -643,12 +651,14 @@ a { color: var(--primary); text-decoration: none; }
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>开始时间<span class="required">*</span></label>
-          <select id="courseStart"></select>
+          <label>开始时间<span class="required">*</span> <button type="button" id="startModeToggle" class="time-mode-btn" onclick="toggleTimeMode()">切换为输入</button></label>
+          <select id="courseStart" class="time-select"></select>
+          <input type="time" id="courseStartInput" class="time-input" style="display:none;">
         </div>
         <div class="form-group">
           <label>结束时间<span class="required">*</span></label>
-          <select id="courseEnd"></select>
+          <select id="courseEnd" class="time-select"></select>
+          <input type="time" id="courseEndInput" class="time-input" style="display:none;">
         </div>
       </div>
       <div class="form-group">
@@ -1160,19 +1170,63 @@ function getSelectedStudentIds() {
   return selectedStudentIds.slice();
 }
 
-/* 初始化时间下拉选项 */
+/* 初始化时间下拉选项（10分钟间隔） */
 function initTimeSelects() {
   const startSel = document.getElementById('courseStart');
   const endSel = document.getElementById('courseEnd');
   startSel.innerHTML = '';
   endSel.innerHTML = '';
   for (let h = 7; h <= 22; h++) {
-    for (const m of [0, 30]) {
+    for (let m = 0; m < 60; m += 10) {
       const val = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
       startSel.innerHTML += `<option value="${val}">${val}</option>`;
       endSel.innerHTML += `<option value="${val}">${val}</option>`;
     }
   }
+}
+
+/* 时间输入/滚动模式切换 */
+let timeMode = 'select'; // 'select' 或 'input'
+function toggleTimeMode() {
+  timeMode = timeMode === 'select' ? 'input' : 'select';
+  const btn = document.getElementById('startModeToggle');
+  const selects = document.querySelectorAll('.time-select');
+  const inputs = document.querySelectorAll('.time-input');
+  if (timeMode === 'input') {
+    // 同步当前select值到input
+    const sv = document.getElementById('courseStart').value;
+    const ev = document.getElementById('courseEnd').value;
+    if (sv) document.getElementById('courseStartInput').value = sv;
+    if (ev) document.getElementById('courseEndInput').value = ev;
+    selects.forEach(s => s.style.display = 'none');
+    inputs.forEach(i => i.style.display = '');
+    btn.textContent = '切换为滚动';
+  } else {
+    // 同步当前input值到select
+    const sv = document.getElementById('courseStartInput').value;
+    const ev = document.getElementById('courseEndInput').value;
+    if (sv) document.getElementById('courseStart').value = sv;
+    if (ev) document.getElementById('courseEnd').value = ev;
+    selects.forEach(s => s.style.display = '');
+    inputs.forEach(i => i.style.display = 'none');
+    btn.textContent = '切换为输入';
+  }
+}
+
+/* 获取当前时间值（兼容两种模式） */
+function getTimeValue(id) {
+  if (timeMode === 'input') {
+    return document.getElementById(id + 'Input').value;
+  }
+  return document.getElementById(id).value;
+}
+
+/* 设置时间值（兼容两种模式） */
+function setTimeValue(id, val) {
+  const sel = document.getElementById(id);
+  const inp = document.getElementById(id + 'Input');
+  if (sel) sel.value = val;
+  if (inp) inp.value = val;
 }
 
 function initTeacherSelect() {
@@ -2010,8 +2064,8 @@ function openCourseModal(courseId) {
     document.getElementById('courseId').value = course.id;
     document.getElementById('courseName').value = course.name;
     document.getElementById('courseDate').value = course.date;
-    document.getElementById('courseStart').value = course.startTime;
-    document.getElementById('courseEnd').value = course.endTime;
+    setTimeValue('courseStart', course.startTime);
+    setTimeValue('courseEnd', course.endTime);
     document.getElementById('courseLocation').value = course.location || '';
     document.getElementById('courseTeacher').value = course.teacherId;
     // 兼职老师：显示输入框并填入名字
@@ -2044,8 +2098,8 @@ function openCourseModal(courseId) {
     document.getElementById('courseName').value = '';
     // 默认日期：当前查看日期
     document.getElementById('courseDate').value = formatDateStr(currentDate);
-    document.getElementById('courseStart').value = '09:00';
-    document.getElementById('courseEnd').value = '10:30';
+    setTimeValue('courseStart', '09:00');
+    setTimeValue('courseEnd', '10:30');
     document.getElementById('courseLocation').value = '';
     // 新建时隐藏兼职老师输入框
     document.getElementById('guestTeacherContainer').style.display = 'none';
@@ -2079,7 +2133,7 @@ function openCourseModal(courseId) {
 
   // 设置表单只读状态
   const editable = courseId ? canEditCourse(DB.courses.find(c => c.id === courseId)) : canCreateCourse();
-  ['courseName','courseDate','courseStart','courseEnd','courseLocation','courseTeacher','courseDesc','guestTeacherName'].forEach(id => {
+  ['courseName','courseDate','courseStart','courseEnd','courseStartInput','courseEndInput','courseLocation','courseTeacher','courseDesc','guestTeacherName'].forEach(id => {
     document.getElementById(id).disabled = !editable;
   });
   document.querySelector('.modal-footer .btn-primary').style.display = editable ? '' : 'none';
@@ -2154,8 +2208,8 @@ function handleTeacherChange() {
 async function saveCourse() {
   const name = document.getElementById('courseName').value.trim();
   const date = document.getElementById('courseDate').value;
-  const start = document.getElementById('courseStart').value;
-  const end = document.getElementById('courseEnd').value;
+  const start = getTimeValue('courseStart');
+  const end = getTimeValue('courseEnd');
   const location = document.getElementById('courseLocation').value.trim();
   const teacherId = document.getElementById('courseTeacher').value;
   const guestTeacherName = document.getElementById('guestTeacherName').value.trim();
