@@ -249,7 +249,7 @@ app.get('/api/data', authRequired, (req, res) => {
 });
 
 app.post('/api/courses', authRequired, (req, res) => {
-  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, repeat, weekdays, studentIds } = req.body;
+  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, repeat, weekdays, studentIds, repeatEndDate } = req.body;
   if (!name || !date || !startTime || !endTime || !teacherId) {
     return res.status(400).json({ error: 'missing required fields' });
   }
@@ -280,16 +280,21 @@ app.post('/api/courses', authRequired, (req, res) => {
     DB.courses.push(course);
     created.push(course);
   } else if (repeatType === 'weekly-weekdays') {
-    // 按星期几重复：用户选择多个星期几，生成16周内所有对应日期的课程
+    // 按星期几重复：从开始日期到截止日期，生成所有对应星期几的课程
     const repeatGroupId = 'r' + Date.now() + Math.random().toString(36).substr(2, 5);
     const selectedDays = (weekdays || []).map(Number).filter(d => d >= 0 && d <= 6);
     if (selectedDays.length === 0) {
       return res.status(400).json({ error: '请至少选择一个星期' });
     }
-    const totalWeeks = 16;
-    for (let w = 0; w < totalWeeks; w++) {
+    // 从起始周开始逐周扫描，直到超过截止日期
+    const endDate = repeatEndDate || addDays(date, 7 * 16);
+    for (let w = 0; ; w++) {
+      let anyInWeek = false;
       for (const wd of selectedDays) {
         const courseDate = getDateForWeekday(date, wd, w);
+        if (courseDate > endDate) continue;
+        if (courseDate < date) continue;
+        anyInWeek = true;
         const course = {
           ...baseCourse,
           id: 'c' + Date.now() + '_w' + w + '_d' + wd + Math.random().toString(36).substr(2, 3),
@@ -300,15 +305,17 @@ app.post('/api/courses', authRequired, (req, res) => {
         DB.courses.push(course);
         created.push(course);
       }
+      if (!anyInWeek && w > 0) break;
     }
   } else {
-    // 每周或隔周，生成16周的课程
+    // 每周或隔周，从开始日期到截止日期
     const repeatGroupId = 'r' + Date.now() + Math.random().toString(36).substr(2, 5);
     const interval = repeatType === 'weekly' ? 7 : 14;
-    const totalWeeks = repeatType === 'biweekly' ? 8 : 16;
+    const endDate = repeatEndDate || addDays(date, interval * 16);
 
-    for (let i = 0; i < totalWeeks; i++) {
+    for (let i = 0; ; i++) {
       const courseDate = addDays(date, i * interval);
+      if (courseDate > endDate) break;
       const course = {
         ...baseCourse,
         id: 'c' + Date.now() + '_' + i + Math.random().toString(36).substr(2, 3),
@@ -351,7 +358,8 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
   const newTeacherId = teacherId || course.teacherId;
   const teacher = DB.teachers.find(t => t.id === newTeacherId);
   const newColor = newTeacherId === 'guest' ? PART_TIME_COLOR : (teacher ? teacher.color : course.color);
-  Object.assign(course, {
+
+  const updates = {
     name: name || course.name,
     date: date || course.date,
     startTime: startTime || course.startTime,
@@ -363,10 +371,25 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
     color: newColor,
     studentIds: studentIds !== undefined ? studentIds : (course.studentIds || []),
     status: status !== undefined ? status : (course.status || 'normal')
-  });
+  };
+
+  // 批量修改：当前课程及之后所有同组课程
+  const allFuture = req.query['all-future'] === '1' && course.repeatGroupId;
+  const updated = [];
+  if (allFuture) {
+    const groupCourses = DB.courses.filter(c => c.repeatGroupId === course.repeatGroupId && c.date >= course.date);
+    groupCourses.forEach(c => {
+      Object.assign(c, updates);
+      updated.push(c);
+    });
+  } else {
+    Object.assign(course, updates);
+    updated.push(course);
+  }
+
   persist();
-  io.emit('course_updated', course);
-  res.json(course);
+  updated.forEach(c => io.emit('course_updated', c));
+  res.json(updated.length === 1 ? updated[0] : { updated: updated.length });
 });
 
 app.delete('/api/courses/:id', authRequired, (req, res) => {
