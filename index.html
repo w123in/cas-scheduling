@@ -806,6 +806,11 @@ function initSocket() {
   socket = io({ transports: ['websocket', 'polling'] });
 
   socket.on('course_created', (course) => {
+    // 老师角色只接收自己的课程
+    if (currentUser.role === 'teacher') {
+      const myTeacher = DB.teachers.find(t => t.username === currentUser.username);
+      if (!myTeacher || course.teacherId !== myTeacher.id) return;
+    }
     if (!DB.courses.find(c => c.id === course.id)) {
       DB.courses.push(course);
       renderCurrentView();
@@ -814,6 +819,11 @@ function initSocket() {
   });
 
   socket.on('course_updated', (course) => {
+    // 老师角色只接收自己的课程
+    if (currentUser.role === 'teacher') {
+      const myTeacher = DB.teachers.find(t => t.username === currentUser.username);
+      if (!myTeacher || course.teacherId !== myTeacher.id) return;
+    }
     const idx = DB.courses.findIndex(c => c.id === course.id);
     if (idx >= 0) {
       DB.courses[idx] = course;
@@ -823,6 +833,14 @@ function initSocket() {
   });
 
   socket.on('course_deleted', (data) => {
+    // 老师角色只处理自己课程的删除
+    if (currentUser.role === 'teacher') {
+      const course = DB.courses.find(c => c.id === data.id);
+      if (course) {
+        const myTeacher = DB.teachers.find(t => t.username === currentUser.username);
+        if (!myTeacher || course.teacherId !== myTeacher.id) return;
+      }
+    }
     DB.courses = DB.courses.filter(c => c.id !== data.id);
     renderCurrentView();
     if (currentPage === 'teachers') renderTeachersPage();
@@ -962,12 +980,12 @@ function canCreateCourse() {
 }
 
 function applyPermission() {
-  // 老师角色默认筛选自己的课程（但可切换查看其他老师）
+  // 老师角色锁定只看自己的课程
   const filter = document.getElementById('teacherFilter');
   if (currentUser.role === 'teacher') {
     const teacher = DB.teachers.find(t => t.username === currentUser.username);
     if (teacher) filter.value = teacher.id;
-    filter.disabled = false;
+    filter.disabled = true; // 锁定，不允许切换
   } else {
     filter.disabled = false;
   }
@@ -1251,7 +1269,13 @@ function getFilteredCourses() {
   const teacherFilter = document.getElementById('teacherFilter').value;
   const studentFilter = document.getElementById('studentFilter') ? document.getElementById('studentFilter').value : '';
   let list = DB.courses.slice();
-  if (teacherFilter) list = list.filter(c => c.teacherId === teacherFilter);
+  // 老师角色强制只看自己的课程
+  if (currentUser && currentUser.role === 'teacher') {
+    const myTeacher = DB.teachers.find(t => t.username === currentUser.username);
+    if (myTeacher) list = list.filter(c => c.teacherId === myTeacher.id);
+  } else if (teacherFilter) {
+    list = list.filter(c => c.teacherId === teacherFilter);
+  }
   if (studentFilter) list = list.filter(c => c.studentIds && c.studentIds.includes(studentFilter));
   return list;
 }
@@ -1793,6 +1817,18 @@ function renderSettingsPage() {
   <div id="studentListContainer"></div>
 
   <div class="page-header" style="margin-top:32px;">
+    <div><h3 style="font-size:16px;">数据备份与恢复</h3></div>
+  </div>
+  <div style="background:#f0f4ff;border:1px solid #c3d8f3;border-radius:8px;padding:20px;">
+    <p style="color:var(--text-secondary);margin-bottom:12px;font-size:13px;">每次更新代码前，请先点击"备份数据"下载数据文件。更新完成后，点击"恢复数据"上传该文件即可还原所有老师、学生和课程数据。</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="backupData()">备份数据（下载）</button>
+      <button class="btn" onclick="document.getElementById('restoreFileInput').click()">恢复数据（上传）</button>
+      <input type="file" id="restoreFileInput" accept=".json" style="display:none;" onchange="restoreData(event)">
+    </div>
+  </div>
+
+  <div class="page-header" style="margin-top:32px;">
     <div><h3 style="font-size:16px;color:var(--danger);">危险操作</h3></div>
   </div>
   <div style="background:#fef0f0;border:1px solid #f0c9cb;border-radius:8px;padding:20px;">
@@ -1912,6 +1948,52 @@ async function saveTeacher() {
     closeTeacherModal();
   } catch (e) {
     alert(e.message || '保存失败');
+  }
+}
+
+/* 备份数据：下载完整数据文件 */
+async function backupData() {
+  try {
+    const res = await fetch('/api/backup', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('备份失败');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const d = new Date();
+    const ts = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
+    a.download = `排课数据备份_${ts}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('备份数据失败：' + e.message);
+  }
+}
+
+/* 恢复数据：上传备份文件 */
+async function restoreData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = ''; // 清空input，允许再次选择同一文件
+  if (!confirm('恢复数据将覆盖当前所有数据，确定吗？')) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data.users || !data.teachers || !data.courses) {
+      alert('文件格式不正确，请选择正确的备份文件');
+      return;
+    }
+    const res = await api('/api/restore', 'POST', data);
+    const tCount = res.teachers ? res.teachers.length : '?';
+    const sCount = res.students ? res.students.length : '?';
+    const cCount = res.courses ? res.courses.length : '?';
+    alert('恢复成功！老师' + tCount + '人，学生' + sCount + '人，课程' + cCount + '节');
+    renderSettingsPage();
+    renderCurrentView();
+  } catch (e) {
+    alert('恢复数据失败：' + (e.message || '文件格式错误'));
   }
 }
 

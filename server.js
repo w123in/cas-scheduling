@@ -240,10 +240,18 @@ app.get('/api/session', (req, res) => {
 });
 
 app.get('/api/data', authRequired, (req, res) => {
+  // 老师角色只返回自己的课程
+  let courses = DB.courses;
+  if (req.user.role === 'teacher') {
+    const teacher = DB.teachers.find(t => t.username === req.user.username);
+    if (teacher) {
+      courses = DB.courses.filter(c => c.teacherId === teacher.id);
+    }
+  }
   res.json({
     teachers: DB.teachers,
     students: DB.students,
-    courses: DB.courses,
+    courses,
     currentUser: req.user
   });
 });
@@ -508,6 +516,32 @@ app.post('/api/reset', authRequired, (req, res) => {
   initTeachers(DB);
   initStudents(DB);
   initSampleCourses(DB);
+  persist();
+  io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
+  res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses });
+});
+
+/* 备份数据：返回完整data.json */
+app.get('/api/backup', authRequired, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="data-backup.json"');
+  res.json(DB);
+});
+
+/* 恢复数据：上传备份文件覆盖当前数据 */
+app.post('/api/restore', authRequired, express.json({ limit: '50mb' }), (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  const data = req.body;
+  if (!data || !data.users || !data.teachers || !data.courses) {
+    return res.status(400).json({ error: '文件格式不正确' });
+  }
+  DB = data;
+  if (!DB.students) DB.students = [];
   persist();
   io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
   res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses });
