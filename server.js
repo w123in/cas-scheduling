@@ -93,19 +93,19 @@ function initSampleCourses(DB) {
   const addDay = (d, n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
 
   const sample = [
-    { day:0, name:'\u9ad8\u7b49\u6570\u5b66',     start:'08:00', end:'09:30', loc:'1\u53f7\u697c301', teacher:'t1', desc:'\u5fae\u79ef\u5206\u57fa\u7840' },
-    { day:0, name:'\u5927\u5b66\u82f1\u8bed',     start:'10:00', end:'11:30', loc:'2\u53f7\u697c201', teacher:'t2', desc:'\u9605\u8bfb\u4e0e\u5199\u4f5c' },
-    { day:0, name:'\u7269\u7406\u5b9e\u9a8c',     start:'14:00', end:'16:00', loc:'\u5b9e\u9a8c\u697c501',teacher:'t3', desc:'\u5149\u5b66\u5b9e\u9a8c' },
-    { day:1, name:'\u7ebf\u6027\u4ee3\u6570',     start:'08:30', end:'10:00', loc:'1\u53f7\u697c105', teacher:'t1', desc:'\u77e9\u9635\u4e0e\u884c\u5217\u5f0f' },
-    { day:1, name:'\u7a0b\u5e8f\u8bbe\u8ba1\u57fa\u7840', start:'13:30', end:'15:00', loc:'\u673a\u623fA',    teacher:'t4', desc:'Python \u5165\u95e8' },
-    { day:2, name:'\u4e2d\u56fd\u8fd1\u4ee3\u53f2',   start:'09:00', end:'10:30', loc:'3\u53f7\u697c402', teacher:'t5', desc:'\u8f9b\u4ea5\u9769\u547d' },
-    { day:2, name:'\u4f53\u80b2\u8bfe',       start:'14:00', end:'15:30', loc:'\u4f53\u80b2\u9986',    teacher:'t6', desc:'\u7bee\u7403\u57fa\u7840' },
-    { day:3, name:'\u6570\u636e\u7ed3\u6784',     start:'08:00', end:'09:30', loc:'\u673a\u623fB',    teacher:'t4', desc:'\u6811\u4e0e\u56fe' },
-    { day:3, name:'\u6982\u7387\u8bba',       start:'10:00', end:'11:30', loc:'1\u53f7\u697c301', teacher:'t1', desc:'\u968f\u673a\u53d8\u91cf' },
-    { day:4, name:'\u8ba1\u7b97\u673a\u7f51\u7edc',   start:'13:00', end:'14:30', loc:'\u673a\u623fA',    teacher:'t7', desc:'TCP/IP' },
-    { day:4, name:'\u5b66\u672f\u8bb2\u5ea7',     start:'15:00', end:'17:00', loc:'\u62a5\u544a\u5385',    teacher:'t8', desc:'\u4eba\u5de5\u667a\u80fd' },
-    { day:2, name:'\u827a\u672f\u8d4f\u6790',     start:'16:00', end:'17:30', loc:'\u827a\u672f\u697c201', teacher:'t9', desc:'\u5370\u8c61\u6d3e\u8d4f\u6790' },
-    { day:3, name:'\u54f2\u5b66\u5bfc\u8bba',     start:'14:00', end:'15:30', loc:'3\u53f7\u697c501', teacher:'t10', desc:'\u53e4\u5e0c\u814a\u54f2\u5b66' },
+    { day:0, name:'\u9ad8\u7b49\u6570\u5b66',     start:'08:00', end:'09:30', loc:'1\u53f7\u697c301', teacher:'t1', desc:'\u5fae\u79ef\u5206\u57fa\u7840', students:['s1','s2','s3','s4','s5'] },
+    { day:0, name:'\u5927\u5b66\u82f1\u8bed',     start:'10:00', end:'11:30', loc:'2\u53f7\u697c201', teacher:'t2', desc:'\u9605\u8bfb\u4e0e\u5199\u4f5c', students:['s1','s2','s6','s7'] },
+    { day:0, name:'\u7269\u7406\u5b9e\u9a8c',     start:'14:00', end:'16:00', loc:'\u5b9e\u9a8c\u697c501',teacher:'t3', desc:'\u5149\u5b66\u5b9e\u9a8c', students:['s3','s8','s9'] },
+    { day:1, name:'\u7ebf\u6027\u4ee3\u6570',     start:'08:30', end:'10:00', loc:'1\u53f7\u697c105', teacher:'t1', desc:'\u77e9\u9635\u4e0e\u884c\u5217\u5f0f', students:['s1','s4','s10'] },
+    { day:1, name:'\u7a0b\u5e8f\u8bbe\u8ba1\u57fa\u7840', start:'13:30', end:'15:00', loc:'\u673a\u623fA',    teacher:'t4', desc:'Python \u5165\u95e8', students:['s2','s5','s6','s11'] },
+    { day:2, name:'\u4e2d\u56fd\u8fd1\u4ee3\u53f2',   start:'09:00', end:'10:30', loc:'3\u53f7\u697c402', teacher:'t5', desc:'\u8f9b\u4ea5\u9769\u547d', students:['s7','s8','s12','s13'] },
+    { day:2, name:'\u4f53\u80b2\u8bfe',       start:'14:00', end:'15:30', loc:'\u4f53\u80b2\u9986',    teacher:'t6', desc:'\u7bee\u7403\u57fa\u7840', students:['s1','s3','s5','s9','s14'] },
+    { day:3, name:'\u6570\u636e\u7ed3\u6784',     start:'08:00', end:'09:30', loc:'\u673a\u623fB',    teacher:'t4', desc:'\u6811\u4e0e\u56fe', students:['s2','s4','s10','s15'] },
+    { day:3, name:'\u6982\u7387\u8bba',       start:'10:00', end:'11:30', loc:'1\u53f7\u697c301', teacher:'t1', desc:'\u968f\u673a\u53d8\u91cf', students:['s1','s6','s11','s16'] },
+    { day:4, name:'\u8ba1\u7b97\u673a\u7f51\u7edc',   start:'13:00', end:'14:30', loc:'\u673a\u623fA',    teacher:'t7', desc:'TCP/IP', students:['s5','s7','s12','s17'] },
+    { day:4, name:'\u5b66\u672f\u8bb2\u5ea7',     start:'15:00', end:'17:00', loc:'\u62a5\u544a\u5385',    teacher:'t8', desc:'\u4eba\u5de5\u667a\u80fd', students:['s1','s2','s3','s4','s5','s6','s7','s8'] },
+    { day:2, name:'\u827a\u672f\u8d4f\u6790',     start:'16:00', end:'17:30', loc:'\u827a\u672f\u697c201', teacher:'t9', desc:'\u5370\u8c61\u6d3e\u8d4f\u6790', students:['s9','s13','s14','s18'] },
+    { day:3, name:'\u54f2\u5b66\u5bfc\u8bba',     start:'14:00', end:'15:30', loc:'3\u53f7\u697c501', teacher:'t10', desc:'\u53e4\u5e0c\u814a\u54f2\u5b66', students:['s10','s15','s19','s20'] },
   ];
   sample.forEach((s, idx) => {
     const teacher = DB.teachers.find(t => t.id === s.teacher);
@@ -119,6 +119,7 @@ function initSampleCourses(DB) {
       teacherId: s.teacher,
       description: s.desc,
       color: teacher ? teacher.color : TEACHER_COLORS[6],
+      studentIds: s.students,
       createdBy: 'scheduler'
     });
   });
