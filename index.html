@@ -335,8 +335,9 @@ a { color: var(--primary); text-decoration: none; }
   padding: 20px;
   background: #fff;
   border-radius: 8px;
-  overflow-x: auto;
+  overflow: visible;
 }
+.student-schedule-wrap.exporting { overflow: visible !important; }
 .ss-title {
   text-align: center;
   font-size: 20px;
@@ -555,6 +556,12 @@ a { color: var(--primary); text-decoration: none; }
           <button class="view-tab active" data-view="week" onclick="switchView('week')">周</button>
           <button class="view-tab" data-view="month" onclick="switchView('month')">月</button>
           <button class="view-tab" data-view="term" onclick="switchView('term')">学期</button>
+          <button class="view-tab" data-view="custom" onclick="switchView('custom')">自定义</button>
+        </div>
+        <div id="customRangePicker" style="display:none;align-items:center;gap:4px;">
+          <input type="date" id="customStartDate" class="filter-select" style="width:130px;font-size:12px;" onchange="renderCurrentView()">
+          <span style="font-size:12px;color:#666;">至</span>
+          <input type="date" id="customEndDate" class="filter-select" style="width:130px;font-size:12px;" onchange="renderCurrentView()">
         </div>
         <select id="termMonthCount" class="filter-select" style="display:none;min-width:70px;font-size:12px;" onchange="renderCurrentView()" title="学期跨度">
           <option value="2">2个月</option>
@@ -1381,10 +1388,20 @@ function switchView(view) {
   });
   const termSel = document.getElementById('termMonthCount');
   if (termSel) termSel.style.display = view === 'term' ? '' : 'none';
+  const customPicker = document.getElementById('customRangePicker');
+  if (customPicker) customPicker.style.display = view === 'custom' ? 'flex' : 'none';
+  // 初始化自定义日期默认值
+  if (view === 'custom') {
+    const sd = document.getElementById('customStartDate');
+    const ed = document.getElementById('customEndDate');
+    if (sd && !sd.value) sd.value = formatDateStr(new Date());
+    if (ed && !ed.value) ed.value = formatDateStr(new Date(Date.now() + 30*24*60*60*1000));
+  }
   renderCurrentView();
 }
 
 function navigateDate(dir) {
+  if (currentView === 'custom') return; // 自定义模式不支持前后导航
   const d = new Date(currentDate);
   if (currentView === 'day') d.setDate(d.getDate() + dir);
   else if (currentView === 'week') d.setDate(d.getDate() + dir * 7);
@@ -1433,6 +1450,7 @@ function renderCurrentView() {
   else if (currentView === 'week') renderWeekView();
   else if (currentView === 'month') renderMonthView();
   else if (currentView === 'term') renderTermView();
+  else if (currentView === 'custom') renderCustomRangeView();
 }
 
 function updateDateLabel() {
@@ -1441,7 +1459,27 @@ function updateDateLabel() {
   if (studentFilter) {
     const student = DB.students.find(s => s.id === studentFilter);
     const sName = student ? student.name : '';
-    el.textContent = sName + ' · ' + currentDate.getFullYear() + '年' + (currentDate.getMonth()+1) + '月';
+    if (currentView === 'day') {
+      el.textContent = sName + ' · ' + currentDate.getFullYear() + '年' + (currentDate.getMonth()+1) + '月' + currentDate.getDate() + '日';
+    } else if (currentView === 'week') {
+      const dates = getWeekDates(currentDate);
+      const s = dates[0], e = dates[6];
+      el.textContent = sName + ' · ' + (s.getMonth()+1) + '月' + s.getDate() + '日 - ' + (e.getMonth()+1) + '月' + e.getDate() + '日';
+    } else if (currentView === 'term') {
+      const sel = document.getElementById('termMonthCount');
+      const mc = sel ? parseInt(sel.value) : 3;
+      const sy = currentDate.getFullYear();
+      const sm = currentDate.getMonth();
+      el.textContent = sName + ' · ' + sy + '年' + (sm+1) + '月-' + (sm+mc) + '月';
+    } else if (currentView === 'custom') {
+      const sd = document.getElementById('customStartDate');
+      const ed = document.getElementById('customEndDate');
+      const sv = sd ? sd.value : '';
+      const ev = ed ? ed.value : '';
+      el.textContent = sName + ' · ' + (sv || '?') + ' 至 ' + (ev || '?');
+    } else {
+      el.textContent = sName + ' · ' + currentDate.getFullYear() + '年' + (currentDate.getMonth()+1) + '月';
+    }
     return;
   }
   if (currentView === 'day') {
@@ -1459,6 +1497,10 @@ function updateDateLabel() {
     const sm = currentDate.getMonth();
     const end = new Date(sy, sm + mc - 1, 1);
     el.textContent = `${sy}年${sm+1}月 - ${end.getFullYear()}年${end.getMonth()+1}月`;
+  } else if (currentView === 'custom') {
+    const sd = document.getElementById('customStartDate');
+    const ed = document.getElementById('customEndDate');
+    el.textContent = (sd ? sd.value : '?') + ' 至 ' + (ed ? ed.value : '?');
   }
 }
 
@@ -1744,46 +1786,100 @@ function renderMonthView() {
 /* ---------- 学生排课表视图（表格格式） ---------- */
 function renderStudentSchedule() {
   const container = document.getElementById('calendarContainer');
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
   const studentFilter = document.getElementById('studentFilter').value;
   const student = DB.students.find(s => s.id === studentFilter);
   const studentName = student ? student.name : '未知学生';
-  const monthStr = (month + 1) + '月';
 
   // 获取该学生的所有课程
-  const courses = getFilteredCourses().filter(c => c.studentIds && c.studentIds.includes(studentFilter));
+  const allCourses = getFilteredCourses().filter(c => c.studentIds && c.studentIds.includes(studentFilter));
 
-  // 按日期分组
+  // 根据当前视图计算日期范围和标题
+  let rangeStart, rangeEnd, titleStr, rangeLabel;
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  if (currentView === 'day') {
+    rangeStart = new Date(currentDate);
+    rangeEnd = new Date(currentDate);
+    titleStr = `学员${escapeHtml(studentName)}${year}年${month+1}月${currentDate.getDate()}日排课表`;
+    rangeLabel = `${year}年${month+1}月${currentDate.getDate()}日`;
+  } else if (currentView === 'week') {
+    const dates = getWeekDates(currentDate);
+    rangeStart = new Date(dates[0]);
+    rangeEnd = new Date(dates[6]);
+    titleStr = `学员${escapeHtml(studentName)}${rangeStart.getMonth()+1}月${rangeStart.getDate()}日-${rangeEnd.getMonth()+1}月${rangeEnd.getDate()}日排课表`;
+    rangeLabel = `${rangeStart.getMonth()+1}月${rangeStart.getDate()}日-${rangeEnd.getMonth()+1}月${rangeEnd.getDate()}日`;
+  } else if (currentView === 'term') {
+    const sel = document.getElementById('termMonthCount');
+    const mc = sel ? parseInt(sel.value) : 3;
+    rangeStart = new Date(year, month, 1);
+    rangeEnd = new Date(year, month + mc, 0);
+    const startMonthLabel = month + 1;
+    const endMonthLabel = month + mc;
+    if (startMonthLabel === endMonthLabel) {
+      titleStr = `学员${escapeHtml(studentName)}${year}年${startMonthLabel}月排课表`;
+      rangeLabel = `${year}年${startMonthLabel}月`;
+    } else {
+      titleStr = `学员${escapeHtml(studentName)}${year}年${startMonthLabel}月-${endMonthLabel}月排课表`;
+      rangeLabel = `${year}年${startMonthLabel}月-${endMonthLabel}月`;
+    }
+  } else if (currentView === 'custom') {
+    const sd = document.getElementById('customStartDate');
+    const ed = document.getElementById('customEndDate');
+    const sv = sd ? sd.value : '';
+    const ev = ed ? ed.value : '';
+    if (!sv || !ev) {
+      container.innerHTML = '<div style="padding:40px;text-align:center;color:#999;">请选择起止日期</div>';
+      return;
+    }
+    rangeStart = dateFromStr(sv);
+    rangeEnd = dateFromStr(ev);
+    if (rangeStart > rangeEnd) { const tmp = rangeStart; rangeStart = rangeEnd; rangeEnd = tmp; }
+    // 生成标题
+    if (formatDateStr(rangeStart) === formatDateStr(rangeEnd)) {
+      titleStr = `学员${escapeHtml(studentName)}${rangeStart.getFullYear()}年${rangeStart.getMonth()+1}月${rangeStart.getDate()}日排课表`;
+      rangeLabel = `${rangeStart.getFullYear()}年${rangeStart.getMonth()+1}月${rangeStart.getDate()}日`;
+    } else if (rangeStart.getMonth() === rangeEnd.getMonth() && rangeStart.getFullYear() === rangeEnd.getFullYear()) {
+      titleStr = `学员${escapeHtml(studentName)}${rangeStart.getMonth()+1}月${rangeStart.getDate()}日-${rangeEnd.getDate()}日排课表`;
+      rangeLabel = `${rangeStart.getMonth()+1}月${rangeStart.getDate()}日-${rangeEnd.getDate()}日`;
+    } else {
+      titleStr = `学员${escapeHtml(studentName)}${rangeStart.getMonth()+1}月${rangeStart.getDate()}日-${rangeEnd.getMonth()+1}月${rangeEnd.getDate()}日排课表`;
+      rangeLabel = `${rangeStart.getMonth()+1}月${rangeStart.getDate()}日-${rangeEnd.getMonth()+1}月${rangeEnd.getDate()}日`;
+    }
+  } else {
+    // 月视图（默认）
+    rangeStart = new Date(year, month, 1);
+    rangeEnd = new Date(year, month + 1, 0);
+    titleStr = `学员${escapeHtml(studentName)}${year}年${month+1}月排课表`;
+    rangeLabel = `${year}年${month+1}月`;
+  }
+
+  // 过滤范围内的课程
+  const startStr = formatDateStr(rangeStart);
+  const endStr = formatDateStr(rangeEnd);
+  const courses = allCourses.filter(c => c.date >= startStr && c.date <= endStr);
+
+  // 按日期分组（仅范围内课程）
   const courseMap = {};
   courses.forEach(c => {
     if (!courseMap[c.date]) courseMap[c.date] = [];
     courseMap[c.date].push(c);
   });
-  // 每天的课程按时间排序
   Object.keys(courseMap).forEach(d => {
     courseMap[d].sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
   });
 
-  // 计算月份的第一天和最后一天
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const daysInMonth = lastDay.getDate();
-
-  // 以周一为起始计算周
-  const startWeekday = firstDay.getDay(); // 0=周日
-  const startOffset = startWeekday === 0 ? 6 : startWeekday - 1;
-  const startDate = new Date(year, month, 1 - startOffset);
-  const endDate = new Date(year, month, daysInMonth);
-  // 补齐到周末
-  const endWeekday = endDate.getDay();
-  const endOffset = endWeekday === 0 ? 0 : 7 - endWeekday;
-  endDate.setDate(endDate.getDate() + endOffset);
+  // 从rangeStart所在周的周一开始，到rangeEnd所在周的周日结束
+  const rangeMonday = getMonday(rangeStart);
+  const rangeEndSunday = new Date(rangeEnd);
+  const endDay = rangeEndSunday.getDay();
+  const endOffset = endDay === 0 ? 0 : 7 - endDay;
+  rangeEndSunday.setDate(rangeEndSunday.getDate() + endOffset);
 
   // 生成周数据
   const weeks = [];
-  let wDate = new Date(startDate);
-  while (wDate <= endDate) {
+  let wDate = new Date(rangeMonday);
+  while (wDate <= rangeEndSunday) {
     const week = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(wDate);
@@ -1796,9 +1892,10 @@ function renderStudentSchedule() {
 
   const WEEK_HEADERS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const today = new Date();
+  const totalCourses = courses.length;
 
   let html = `<div class="student-schedule-wrap">
-    <div class="ss-title">学员${escapeHtml(studentName)}${monthStr}排课表</div>
+    <div class="ss-title">${titleStr}</div>
     <table class="ss-table">
       <thead>
         <tr>
@@ -1813,11 +1910,11 @@ function renderStudentSchedule() {
     html += '<tr class="ss-date-row">';
     html += '<td class="ss-date-label">日期</td>';
     week.forEach(d => {
-      const isThisMonth = d.getMonth() === month;
+      const inRange = d >= rangeStart && d <= rangeEnd;
       const isToday = isSameDate(d, today);
       const dayLabel = `${d.getMonth()+1}月${d.getDate()}日`;
       const weekLabel = WEEK_HEADERS[d.getDay() === 0 ? 6 : d.getDay() - 1];
-      html += `<td class="ss-date-cell ${isThisMonth ? '' : 'ss-other-month'} ${isToday ? 'ss-today' : ''}">
+      html += `<td class="ss-date-cell ${inRange ? '' : 'ss-other-month'} ${isToday ? 'ss-today' : ''}">
         ${dayLabel} ${weekLabel}
       </td>`;
     });
@@ -1846,7 +1943,6 @@ function renderStudentSchedule() {
   });
 
   // 底部备注
-  const totalCourses = courses.length;
   html += `</tbody>
     </table>
     <div class="ss-notes">
@@ -1859,11 +1955,122 @@ function renderStudentSchedule() {
   </div>`;
 
   container.innerHTML = html;
+  // 存储当前范围标签供导出使用
+  container.dataset.ssRangeLabel = rangeLabel;
+  container.dataset.ssTitle = titleStr;
 }
 
 function showDayDetail(dateStr) {
   currentDate = dateFromStr(dateStr);
   switchView('day');
+}
+
+/* ============================================================
+   自定义日期范围视图（非学生筛选时）
+   ============================================================ */
+function renderCustomRangeView() {
+  const container = document.getElementById('calendarContainer');
+  const sd = document.getElementById('customStartDate');
+  const ed = document.getElementById('customEndDate');
+  const sv = sd ? sd.value : '';
+  const ev = ed ? ed.value : '';
+  if (!sv || !ev) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#999;">请选择起止日期</div>';
+    return;
+  }
+  let startDate = dateFromStr(sv);
+  let endDate = dateFromStr(ev);
+  if (startDate > endDate) { const tmp = startDate; startDate = endDate; endDate = tmp; }
+
+  const startStr = formatDateStr(startDate);
+  const endStr = formatDateStr(endDate);
+  const teacherFilter = document.getElementById('teacherFilter').value;
+  let list = DB.courses.filter(c => c.date >= startStr && c.date <= endStr);
+  if (teacherFilter) list = list.filter(c => c.teacherId === teacherFilter);
+  list.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+
+  const courseMap = {};
+  list.forEach(c => {
+    if (!courseMap[c.date]) courseMap[c.date] = [];
+    courseMap[c.date].push(c);
+  });
+
+  const rangeMonday = getMonday(startDate);
+  const rangeEndSunday = new Date(endDate);
+  const endDay = rangeEndSunday.getDay();
+  const endOffset = endDay === 0 ? 0 : 7 - endDay;
+  rangeEndSunday.setDate(rangeEndSunday.getDate() + endOffset);
+
+  const weeks = [];
+  let wDate = new Date(rangeMonday);
+  while (wDate <= rangeEndSunday) {
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(wDate);
+      d.setDate(d.getDate() + i);
+      week.push(d);
+    }
+    weeks.push(week);
+    wDate.setDate(wDate.getDate() + 7);
+  }
+
+  const WEEK_HEADERS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const today = new Date();
+  const totalCourses = list.length;
+
+  let titleStr;
+  if (formatDateStr(startDate) === formatDateStr(endDate)) {
+    titleStr = `${startDate.getFullYear()}年${startDate.getMonth()+1}月${startDate.getDate()}日排课表`;
+  } else {
+    titleStr = `${startDate.getMonth()+1}月${startDate.getDate()}日-${endDate.getMonth()+1}月${endDate.getDate()}日排课表`;
+  }
+
+  let html = `<div class="student-schedule-wrap">
+    <div class="ss-title">${escapeHtml(titleStr)}</div>
+    <table class="ss-table">
+      <thead>
+        <tr>
+          <th class="ss-corner">日期</th>
+          ${WEEK_HEADERS.map(w => `<th class="ss-day-header">${w}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>`;
+
+  weeks.forEach(week => {
+    html += '<tr class="ss-date-row">';
+    html += '<td class="ss-date-label">日期</td>';
+    week.forEach(d => {
+      const inRange = d >= startDate && d <= endDate;
+      const isToday = isSameDate(d, today);
+      const dayLabel = `${d.getMonth()+1}月${d.getDate()}日`;
+      const weekLabel = WEEK_HEADERS[d.getDay() === 0 ? 6 : d.getDay() - 1];
+      html += `<td class="ss-date-cell ${inRange ? '' : 'ss-other-month'} ${isToday ? 'ss-today' : ''}">${dayLabel} ${weekLabel}</td>`;
+    });
+    html += '</tr>';
+
+    html += '<tr class="ss-content-row">';
+    html += '<td class="ss-content-label">课程</td>';
+    week.forEach(d => {
+      const dateStr = formatDateStr(d);
+      const dayCourses = courseMap[dateStr] || [];
+      let cellHtml = '';
+      dayCourses.forEach(c => {
+        const teacher = getTeacherById(c.teacherId);
+        const teacherColor = c.teacherId === 'guest' ? '#1c2d5a' : (teacher ? teacher.color : '#333');
+        const teacherName = getTeacherDisplayName(c);
+        const isCancelled = c.status === 'cancelled';
+        cellHtml += `<div class="ss-course" style="color:${isCancelled ? '#999' : teacherColor};${isCancelled ? 'text-decoration:line-through;' : ''}">
+          <div class="ss-time">${c.startTime}-${c.endTime}</div>
+          <div class="ss-info">${escapeHtml(teacherName)} ${escapeHtml(c.name)}</div>
+        </div>`;
+      });
+      html += `<td class="ss-content-cell">${cellHtml || '&nbsp;'}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += `</tbody></table></div>`;
+  container.innerHTML = html;
 }
 
 /* ============================================================
@@ -2642,8 +2849,42 @@ async function deleteCurrentCourse() {
    CSV 导出
    ============================================================ */
 function exportCSV() {
+  const studentFilter = document.getElementById('studentFilter') ? document.getElementById('studentFilter').value : '';
+  const teacherFilter = document.getElementById('teacherFilter').value;
   let startDate, endDate, rangeLabel;
-  if (currentView === 'day') {
+
+  if (studentFilter) {
+    // 学生排课表：使用与渲染相同的日期范围逻辑
+    if (currentView === 'day') {
+      startDate = endDate = new Date(currentDate);
+      rangeLabel = `${currentDate.getFullYear()}年${currentDate.getMonth()+1}月${currentDate.getDate()}日`;
+    } else if (currentView === 'week') {
+      const dates = getWeekDates(currentDate);
+      startDate = dates[0]; endDate = dates[6];
+      rangeLabel = `${startDate.getMonth()+1}月${startDate.getDate()}日-${endDate.getMonth()+1}月${endDate.getDate()}日`;
+    } else if (currentView === 'term') {
+      const sel = document.getElementById('termMonthCount');
+      const mc = sel ? parseInt(sel.value) : 3;
+      startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + mc, 0);
+      rangeLabel = `${currentDate.getFullYear()}年${currentDate.getMonth()+1}月-${currentDate.getMonth()+mc}月`;
+    } else if (currentView === 'custom') {
+      const sd = document.getElementById('customStartDate');
+      const ed = document.getElementById('customEndDate');
+      startDate = sd && sd.value ? dateFromStr(sd.value) : new Date();
+      endDate = ed && ed.value ? dateFromStr(ed.value) : new Date();
+      if (startDate > endDate) { const tmp = startDate; startDate = endDate; endDate = tmp; }
+      if (formatDateStr(startDate) === formatDateStr(endDate)) {
+        rangeLabel = `${startDate.getFullYear()}年${startDate.getMonth()+1}月${startDate.getDate()}日`;
+      } else {
+        rangeLabel = `${startDate.getMonth()+1}月${startDate.getDate()}日-${endDate.getMonth()+1}月${endDate.getDate()}日`;
+      }
+    } else {
+      startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+      rangeLabel = `${currentDate.getFullYear()}年${currentDate.getMonth()+1}月`;
+    }
+  } else if (currentView === 'day') {
     startDate = endDate = new Date(currentDate);
     rangeLabel = formatDateStr(currentDate);
   } else if (currentView === 'week') {
@@ -2656,6 +2897,13 @@ function exportCSV() {
     startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + mc, 0);
     rangeLabel = `${formatDateStr(startDate)}_${formatDateStr(endDate)}`;
+  } else if (currentView === 'custom') {
+    const sd = document.getElementById('customStartDate');
+    const ed = document.getElementById('customEndDate');
+    startDate = sd && sd.value ? dateFromStr(sd.value) : new Date();
+    endDate = ed && ed.value ? dateFromStr(ed.value) : new Date();
+    if (startDate > endDate) { const tmp = startDate; startDate = endDate; endDate = tmp; }
+    rangeLabel = `${formatDateStr(startDate)}_${formatDateStr(endDate)}`;
   } else {
     startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
@@ -2664,8 +2912,6 @@ function exportCSV() {
 
   const startStr = formatDateStr(startDate);
   const endStr = formatDateStr(endDate);
-  const teacherFilter = document.getElementById('teacherFilter').value;
-  const studentFilter = document.getElementById('studentFilter') ? document.getElementById('studentFilter').value : '';
   let list = DB.courses.filter(c => c.date >= startStr && c.date <= endStr);
   if (teacherFilter) list = list.filter(c => c.teacherId === teacherFilter);
   if (studentFilter) list = list.filter(c => c.studentIds && c.studentIds.includes(studentFilter));
@@ -2674,7 +2920,7 @@ function exportCSV() {
   const headers = ['课程名称','日期','星期','开始时间','结束时间','地点','授课老师','关联学生','描述','颜色'];
   const rows = list.map(c => {
     const teacher = getTeacherById(c.teacherId);
-    const teacherName = getTeacherDisplayName(c);
+    const teacherName = studentFilter ? getTeacherShortName(c) : getTeacherDisplayName(c);
     const wd = WEEK_NAMES[dateFromStr(c.date).getDay()];
     const studentNames = (c.studentIds || []).map(sid => {
       const s = DB.students.find(x => x.id === sid);
@@ -2747,10 +2993,10 @@ function exportImage() {
   let fileSuffix = '';
 
   if (studentFilter) {
-    // 学生排课表视图
+    // 学生排课表视图：使用渲染时存储的范围标签
     const student = DB.students.find(s => s.id === studentFilter);
     const sName = student ? student.name : '';
-    rangeLabel = currentDate.getFullYear() + '年' + (currentDate.getMonth()+1) + '月';
+    rangeLabel = container.dataset.ssRangeLabel || (currentDate.getFullYear() + '年' + (currentDate.getMonth()+1) + '月');
     fileSuffix = '_' + sName + '排课表';
   } else {
     if (currentView === 'day') {
@@ -2764,6 +3010,12 @@ function exportImage() {
       const startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + mc, 0);
       rangeLabel = formatDateStr(startDate) + '_' + formatDateStr(endDate);
+    } else if (currentView === 'custom') {
+      const sd = document.getElementById('customStartDate');
+      const ed = document.getElementById('customEndDate');
+      const sv = sd ? sd.value : '';
+      const ev = ed ? ed.value : '';
+      rangeLabel = sv + '_' + ev;
     } else {
       rangeLabel = currentDate.getFullYear() + '年' + (currentDate.getMonth()+1) + '月';
     }
@@ -2774,6 +3026,11 @@ function exportImage() {
   }
   const fileName = '排课_' + rangeLabel + fileSuffix + '.png';
 
+  // 导出前临时移除overflow限制，确保完整捕获
+  const wrapEl = container.querySelector('.student-schedule-wrap');
+  const oldOverflow = wrapEl ? wrapEl.style.overflow : '';
+  if (wrapEl) wrapEl.style.overflow = 'visible';
+
   setTimeout(() => {
     html2canvas(container, {
       backgroundColor: '#ffffff',
@@ -2782,8 +3039,11 @@ function exportImage() {
       scrollX: 0,
       scrollY: 0,
       windowWidth: container.scrollWidth,
-      windowHeight: container.scrollHeight
+      windowHeight: container.scrollHeight,
+      height: container.scrollHeight,
+      width: container.scrollWidth
     }).then(canvas => {
+      if (wrapEl) wrapEl.style.overflow = oldOverflow;
       canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -2796,6 +3056,7 @@ function exportImage() {
         document.body.removeChild(overlay);
       });
     }).catch(err => {
+      if (wrapEl) wrapEl.style.overflow = oldOverflow;
       document.body.removeChild(overlay);
       alert('导出图片失败：' + err.message);
     });
