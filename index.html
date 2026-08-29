@@ -156,6 +156,8 @@ a { color: var(--primary); text-decoration: none; }
 .content { flex: 1; overflow: hidden; position: relative; }
 .page { display: none; height: 100%; }
 .page.active { display: block; }
+/* 学生排课表视图需要可滚动 */
+#page-calendar #calendarContainer { height: 100%; overflow-y: auto; }
 
 /* ============ 日视图 ============ */
 .day-view-wrap { height: 100%; overflow-y: auto; padding: 12px; }
@@ -3030,6 +3032,8 @@ function exportImage() {
   const wrapEl = container.querySelector('.student-schedule-wrap');
   const oldOverflow = wrapEl ? wrapEl.style.overflow : '';
   if (wrapEl) wrapEl.style.overflow = 'visible';
+  const oldContainerOverflow = container.style.overflowY;
+  container.style.overflowY = 'visible';
 
   setTimeout(() => {
     html2canvas(container, {
@@ -3044,6 +3048,7 @@ function exportImage() {
       width: container.scrollWidth
     }).then(canvas => {
       if (wrapEl) wrapEl.style.overflow = oldOverflow;
+      container.style.overflowY = oldContainerOverflow;
       canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -3057,6 +3062,7 @@ function exportImage() {
       });
     }).catch(err => {
       if (wrapEl) wrapEl.style.overflow = oldOverflow;
+      container.style.overflowY = oldContainerOverflow;
       document.body.removeChild(overlay);
       alert('导出图片失败：' + err.message);
     });
