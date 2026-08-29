@@ -1480,6 +1480,20 @@ function getTeacherDisplayName(course) {
   return teacher ? teacher.name : '';
 }
 
+// 将老师全名转为"姓+老师"格式（如"王朝"→"王老师"）
+function getTeacherShortName(course) {
+  let name;
+  if (course.teacherId === 'guest') {
+    name = course.guestTeacherName || '兼职老师';
+  } else {
+    const teacher = getTeacherById(course.teacherId);
+    name = teacher ? teacher.name : '';
+  }
+  if (!name) return '';
+  if (name.startsWith('老师')) return name; // 默认老师名如"老师1"保持不变
+  return name.charAt(0) + '老师';
+}
+
 function getRepeatBadge(course) {
   if (course.repeatType === 'weekly') return '<span style="font-size:10px;background:rgba(59,91,219,.12);color:#2b44a8;padding:1px 5px;border-radius:3px;margin-left:4px;white-space:nowrap;">每周</span>';
   if (course.repeatType === 'biweekly') return '<span style="font-size:10px;background:rgba(124,77,255,.12);color:#5b2ad6;padding:1px 5px;border-radius:3px;margin-left:4px;white-space:nowrap;">隔周</span>';
@@ -1819,7 +1833,7 @@ function renderStudentSchedule() {
       dayCourses.forEach(c => {
         const teacher = getTeacherById(c.teacherId);
         const teacherColor = c.teacherId === 'guest' ? '#1c2d5a' : (teacher ? teacher.color : '#333');
-        const teacherName = getTeacherDisplayName(c);
+        const teacherName = getTeacherShortName(c);
         const isCancelled = c.status === 'cancelled';
         cellHtml += `<div class="ss-course" style="color:${isCancelled ? '#999' : teacherColor};${isCancelled ? 'text-decoration:line-through;' : ''}">
           <div class="ss-time">${c.startTime}-${c.endTime}</div>
@@ -1836,10 +1850,10 @@ function renderStudentSchedule() {
   html += `</tbody>
     </table>
     <div class="ss-notes">
-      <div class="ss-notes-title">备注</div>
+      <div class="ss-notes-title">拟定学员作品集排课表：</div>
       <div class="ss-notes-content">
-        共${totalCourses}节课 | 排课月份：${year}年${monthStr}<br>
-        课程颜色按老师区分，如有疑问请联系排课老师确认。
+        1.上课时长根据专业老师上课内容及学生作业完成情况而定，每次课前必须完成上节课课后作业；<br>
+        2.需请假必须提前与教务老师沟通后上课时间可进行调整。
       </div>
     </div>
   </div>`;
