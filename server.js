@@ -15,7 +15,7 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'data.json');
 
-// 10种高区分度颜色（色相分布均匀，避免同色系混淆）
+// 30种高区分度颜色（色相分布均匀，避免同色系混淆）
 const TEACHER_COLORS = [
   '#e03131', // 红
   '#f76707', // 橙
@@ -27,27 +27,47 @@ const TEACHER_COLORS = [
   '#7048e8', // 紫
   '#c2255c', // 玫红
   '#8b5a2b', // 棕
+  '#d6336c', // 深粉
+  '#e8590c', // 深橙
+  '#f08c00', // 深金
+  '#099268', // 深绿
+  '#087f5b', // 深青绿
+  '#0c8599', // 深青
+  '#1864ab', // 深蓝
+  '#6741d9', // 深紫
+  '#ae3ec9', // 品红
+  '#5c940d', // 橄榄绿
+  '#d9480f', // 红棕
+  '#fcc419', // 亮黄
+  '#94d82d', // 嫩绿
+  '#22b8cf', // 湖蓝
+  '#339af0', // 天蓝
+  '#5c7cfa', // 靛蓝
+  '#845ef7', // 薰衣草紫
+  '#f06595', // 粉红
+  '#ffa94d', // 浅橙
+  '#74c0fc', // 浅蓝
 ];
 // 兼职老师统一藏青色（避免与取消课程的灰色混淆）
 const PART_TIME_COLOR = '#1c2d5a';
 
 function getDefaultDB() {
+  const users = [
+    { username: 'admin',     password: 'admin123',    role: 'admin',    name: '管理员A' },
+    { username: 'admin2',    password: 'admin123',    role: 'admin',    name: '管理员B' },
+    { username: 'scheduler', password: 'scheduler123', role: 'scheduler', name: '排课人' },
+  ];
+  for (let i = 1; i <= 30; i++) {
+    users.push({
+      username: 'teacher' + i,
+      password: '123456',
+      role: 'teacher',
+      name: '老师' + i,
+      teacherIndex: i - 1
+    });
+  }
   return {
-    users: [
-      { username: 'admin',     password: 'admin123',    role: 'admin',    name: '管理员A' },
-      { username: 'admin2',    password: 'admin123',    role: 'admin',    name: '管理员B' },
-      { username: 'scheduler', password: 'scheduler123', role: 'scheduler', name: '排课人' },
-      { username: 'teacher1', password: '123456', role: 'teacher', name: '老师1', teacherIndex: 0 },
-      { username: 'teacher2', password: '123456', role: 'teacher', name: '老师2', teacherIndex: 1 },
-      { username: 'teacher3', password: '123456', role: 'teacher', name: '老师3', teacherIndex: 2 },
-      { username: 'teacher4', password: '123456', role: 'teacher', name: '老师4', teacherIndex: 3 },
-      { username: 'teacher5', password: '123456', role: 'teacher', name: '老师5', teacherIndex: 4 },
-      { username: 'teacher6', password: '123456', role: 'teacher', name: '老师6', teacherIndex: 5 },
-      { username: 'teacher7', password: '123456', role: 'teacher', name: '老师7', teacherIndex: 6 },
-      { username: 'teacher8', password: '123456', role: 'teacher', name: '老师8', teacherIndex: 7 },
-      { username: 'teacher9', password: '123456', role: 'teacher', name: '老师9', teacherIndex: 8 },
-      { username: 'teacher10', password: '123456', role: 'teacher', name: '老师10', teacherIndex: 9 },
-    ],
+    users,
     teachers: [],
     students: [],
     courses: []
@@ -75,7 +95,7 @@ function getMonday(d) {
 
 function initTeachers(DB) {
   DB.teachers = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 30; i++) {
     const u = DB.users.find(u => u.username === 'teacher' + (i + 1));
     DB.teachers.push({
       id: 't' + (i + 1),
@@ -159,6 +179,34 @@ if (!loadPersisted()) {
   initStudents(DB);
   initSampleCourses(DB);
   persist();
+} else {
+  // 确保老师数量不少于30个（兼容旧数据）
+  if (DB.teachers.length < 30) {
+    const existingCount = DB.teachers.length;
+    for (let i = existingCount; i < 30; i++) {
+      const username = 'teacher' + (i + 1);
+      // 同时补充用户账号
+      if (!DB.users.find(u => u.username === username)) {
+        DB.users.push({
+          username,
+          password: '123456',
+          role: 'teacher',
+          name: '老师' + (i + 1),
+          teacherIndex: i
+        });
+      }
+      if (!DB.teachers.find(t => t.id === 't' + (i + 1))) {
+        DB.teachers.push({
+          id: 't' + (i + 1),
+          name: '老师' + (i + 1),
+          username,
+          color: TEACHER_COLORS[i]
+        });
+      }
+    }
+    console.log(`expanded teachers from ${existingCount} to 30`);
+    persist();
+  }
 }
 
 /* ---------- Session Management ---------- */
@@ -610,5 +658,5 @@ io.on('connection', (socket) => {
 /* ---------- Start Server ---------- */
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Accounts: admin/admin123, scheduler/scheduler123, teacher1~10/123456`);
+  console.log(`Accounts: admin/admin123, scheduler/scheduler123, teacher1~30/123456`);
 });
