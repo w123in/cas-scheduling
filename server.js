@@ -172,6 +172,36 @@ function loadPersisted() {
   return false;
 }
 
+// 确保老师数量不少于30个（兼容旧数据/恢复数据）
+function ensureMinTeachers(minCount) {
+  minCount = minCount || 30;
+  const existingCount = DB.teachers.length;
+  if (existingCount >= minCount) return false;
+  for (let i = existingCount; i < minCount; i++) {
+    const username = 'teacher' + (i + 1);
+    // 同时补充用户账号
+    if (!DB.users.find(u => u.username === username)) {
+      DB.users.push({
+        username,
+        password: '123456',
+        role: 'teacher',
+        name: '老师' + (i + 1),
+        teacherIndex: i
+      });
+    }
+    if (!DB.teachers.find(t => t.id === 't' + (i + 1))) {
+      DB.teachers.push({
+        id: 't' + (i + 1),
+        name: '老师' + (i + 1),
+        username,
+        color: TEACHER_COLORS[i]
+      });
+    }
+  }
+  console.log(`expanded teachers from ${existingCount} to ${minCount}`);
+  return true;
+}
+
 // Initialize: load from file if exists, otherwise create fresh
 if (!loadPersisted()) {
   console.log('no data file, initializing fresh data');
@@ -180,31 +210,7 @@ if (!loadPersisted()) {
   initSampleCourses(DB);
   persist();
 } else {
-  // 确保老师数量不少于30个（兼容旧数据）
-  if (DB.teachers.length < 30) {
-    const existingCount = DB.teachers.length;
-    for (let i = existingCount; i < 30; i++) {
-      const username = 'teacher' + (i + 1);
-      // 同时补充用户账号
-      if (!DB.users.find(u => u.username === username)) {
-        DB.users.push({
-          username,
-          password: '123456',
-          role: 'teacher',
-          name: '老师' + (i + 1),
-          teacherIndex: i
-        });
-      }
-      if (!DB.teachers.find(t => t.id === 't' + (i + 1))) {
-        DB.teachers.push({
-          id: 't' + (i + 1),
-          name: '老师' + (i + 1),
-          username,
-          color: TEACHER_COLORS[i]
-        });
-      }
-    }
-    console.log(`expanded teachers from ${existingCount} to 30`);
+  if (ensureMinTeachers(30)) {
     persist();
   }
 }
@@ -591,6 +597,8 @@ app.post('/api/restore', authRequired, express.json({ limit: '50mb' }), (req, re
   }
   DB = data;
   if (!DB.students) DB.students = [];
+  // 恢复后确保老师数量不少于30个
+  ensureMinTeachers(30);
   persist();
   io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
   res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses });
