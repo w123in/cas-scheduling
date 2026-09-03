@@ -147,6 +147,33 @@ function initSampleCourses(DB) {
 
 let DB = getDefaultDB();
 
+/* ---------- 撤销/重做历史栈 ---------- */
+const HISTORY_LIMIT = 30;
+let undoStack = [];
+let redoStack = [];
+
+function snapshotDB() {
+  return JSON.parse(JSON.stringify({
+    users: DB.users,
+    teachers: DB.teachers,
+    students: DB.students,
+    courses: DB.courses
+  }));
+}
+
+function restoreSnapshot(snap) {
+  DB.users = snap.users;
+  DB.teachers = snap.teachers;
+  DB.students = snap.students;
+  DB.courses = snap.courses;
+}
+
+function saveHistory() {
+  undoStack.push(snapshotDB());
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  redoStack = []; // 新操作清空 redo 栈
+}
+
 function persist() {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(DB, null, 2));
@@ -320,6 +347,7 @@ app.post('/api/courses', authRequired, (req, res) => {
   if (teacherId === 'guest' && !guestTeacherName) {
     return res.status(400).json({ error: '请输入兼职老师姓名' });
   }
+  saveHistory(); // 保存历史快照（撤销用）
   const teacher = DB.teachers.find(t => t.id === teacherId);
   const color = teacherId === 'guest' ? PART_TIME_COLOR : (teacher ? teacher.color : TEACHER_COLORS[6]);
   const baseCourse = {
@@ -417,6 +445,7 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
   const course = DB.courses.find(c => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'course not found' });
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
+  saveHistory();
   const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, studentIds, status } = req.body;
   const newTeacherId = teacherId || course.teacherId;
   const teacher = DB.teachers.find(t => t.id === newTeacherId);
@@ -440,9 +469,24 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
   const allFuture = req.query['all-future'] === '1' && course.repeatGroupId;
   const updated = [];
   if (allFuture) {
+    // 计算日期偏移量：用户修改了日期时，对每节课应用相同的偏移而非覆盖为同一天
+    const origDate = new Date(course.date + 'T00:00:00');
+    const newDateRaw = date ? new Date(date + 'T00:00:00') : origDate;
+    const dateOffsetDays = Math.round((newDateRaw - origDate) / 86400000);
+
     const groupCourses = DB.courses.filter(c => c.repeatGroupId === course.repeatGroupId && c.date >= course.date);
     groupCourses.forEach(c => {
-      Object.assign(c, updates);
+      const courseUpdates = { ...updates };
+      if (c.id !== course.id && date) {
+        // 对非当前课程，按偏移量计算新日期，而非直接覆盖
+        const cDate = new Date(c.date + 'T00:00:00');
+        cDate.setDate(cDate.getDate() + dateOffsetDays);
+        courseUpdates.date = cDate.getFullYear() + '-' + String(cDate.getMonth() + 1).padStart(2, '0') + '-' + String(cDate.getDate()).padStart(2, '0');
+      } else if (c.id !== course.id) {
+        // 用户没改日期，保留原日期
+        courseUpdates.date = c.date;
+      }
+      Object.assign(c, courseUpdates);
       updated.push(c);
     });
   } else {
@@ -459,6 +503,7 @@ app.delete('/api/courses/:id', authRequired, (req, res) => {
   const course = DB.courses.find(c => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'course not found' });
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
+  saveHistory();
   const deleteAll = req.query.all === '1' && course.repeatGroupId;
   if (deleteAll) {
     // 删除同一重复组的所有课程
@@ -488,6 +533,7 @@ app.put('/api/teachers/:id', authRequired, (req, res) => {
   }
   const teacher = DB.teachers.find(t => t.id === req.params.id);
   if (!teacher) return res.status(404).json({ error: 'teacher not found' });
+  saveHistory();
   const { name, color } = req.body;
   if (name) {
     teacher.name = name;
@@ -518,6 +564,7 @@ app.post('/api/students', authRequired, (req, res) => {
   if (!name || !name.trim()) {
     return res.status(400).json({ error: '学生姓名不能为空' });
   }
+  saveHistory();
   const student = {
     id: 's' + Date.now() + Math.random().toString(36).substr(2, 4),
     name: name.trim()
@@ -534,6 +581,7 @@ app.put('/api/students/:id', authRequired, (req, res) => {
   }
   const student = DB.students.find(s => s.id === req.params.id);
   if (!student) return res.status(404).json({ error: 'student not found' });
+  saveHistory();
   const { name } = req.body;
   if (name) student.name = name.trim();
   persist();
@@ -545,6 +593,7 @@ app.delete('/api/students/:id', authRequired, (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'admin only' });
   }
+  saveHistory();
   DB.students = DB.students.filter(s => s.id !== req.params.id);
   // 从课程中移除该学生
   DB.courses.forEach(c => {
@@ -567,6 +616,7 @@ app.post('/api/reset', authRequired, (req, res) => {
       fs.unlinkSync(DB_FILE);
     }
   } catch (e) {}
+  saveHistory();
   DB = getDefaultDB();
   initTeachers(DB);
   initStudents(DB);
@@ -595,6 +645,7 @@ app.post('/api/restore', authRequired, express.json({ limit: '50mb' }), (req, re
   if (!data || !data.users || !data.teachers || !data.courses) {
     return res.status(400).json({ error: '文件格式不正确' });
   }
+  saveHistory();
   DB = data;
   if (!DB.students) DB.students = [];
   // 恢复后确保老师数量不少于30个
@@ -602,6 +653,33 @@ app.post('/api/restore', authRequired, express.json({ limit: '50mb' }), (req, re
   persist();
   io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
   res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses });
+});
+
+/* ---------- 撤销/重做 API ---------- */
+app.post('/api/undo', authRequired, (req, res) => {
+  if (undoStack.length === 0) {
+    return res.status(400).json({ error: '没有可撤销的操作' });
+  }
+  redoStack.push(snapshotDB());
+  restoreSnapshot(undoStack.pop());
+  persist();
+  io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
+  res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 });
+});
+
+app.post('/api/redo', authRequired, (req, res) => {
+  if (redoStack.length === 0) {
+    return res.status(400).json({ error: '没有可重做的操作' });
+  }
+  undoStack.push(snapshotDB());
+  restoreSnapshot(redoStack.pop());
+  persist();
+  io.emit('data_reset', { teachers: DB.teachers, students: DB.students, courses: DB.courses });
+  res.json({ ok: true, teachers: DB.teachers, students: DB.students, courses: DB.courses, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 });
+});
+
+app.get('/api/undo-status', authRequired, (req, res) => {
+  res.json({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 });
 });
 
 function canEditCourse(user, course) {

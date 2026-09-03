@@ -62,6 +62,8 @@ a { color: var(--primary); text-decoration: none; }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--text-secondary); }
 .btn-ghost:hover { background: #eef0f5; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-icon { padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; }
+.btn-icon:not(:disabled):hover { background: #f0f0f0; }
 .btn-icon { padding: 6px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-secondary); }
 .btn-icon:hover { background: #eef0f5; color: var(--text); }
 
@@ -572,6 +574,12 @@ a { color: var(--primary); text-decoration: none; }
           <option value="5">5个月</option>
           <option value="6">6个月</option>
         </select>
+        <button class="btn btn-sm btn-icon" id="undoBtn" onclick="doUndo()" title="撤销 (Ctrl+Z)" style="opacity:0.4;cursor:not-allowed;" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-15-6.7L3 13"></path></svg>
+        </button>
+        <button class="btn btn-sm btn-icon" id="redoBtn" onclick="doRedo()" title="重做 (Ctrl+Y)" style="opacity:0.4;cursor:not-allowed;" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"></path><path d="M3 17a9 9 0 0 1 15-6.7L21 13"></path></svg>
+        </button>
         <button class="btn btn-primary btn-sm" id="newCourseBtn" onclick="openCourseModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           <span class="hide-mobile">新建课程</span>
@@ -975,6 +983,7 @@ function initSocket() {
     renderCurrentView();
     if (currentPage === 'teachers') renderTeachersPage();
     if (currentPage === 'settings') renderSettingsPage();
+    refreshUndoStatus();
   });
 
   socket.on('student_updated', (student) => {
@@ -999,6 +1008,92 @@ function initSocket() {
     if (currentPage === 'settings') renderSettingsPage();
   });
 }
+
+/* ---------- 撤销/重做 ---------- */
+async function doUndo() {
+  try {
+    const res = await fetch('/api/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' });
+    const data = await res.json();
+    if (data.ok) {
+      DB.teachers = data.teachers || [];
+      DB.students = data.students || [];
+      DB.courses = data.courses || [];
+      initTeacherFilter();
+      initStudentFilter();
+      initTeacherSelect();
+      updateUndoButtons(data.canUndo, data.canRedo);
+      renderCurrentView();
+      if (currentPage === 'teachers') renderTeachersPage();
+      if (currentPage === 'settings') renderSettingsPage();
+    } else {
+      alert(data.error || '撤销失败');
+    }
+  } catch (e) {
+    alert('撤销操作失败: ' + e.message);
+  }
+}
+
+async function doRedo() {
+  try {
+    const res = await fetch('/api/redo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' });
+    const data = await res.json();
+    if (data.ok) {
+      DB.teachers = data.teachers || [];
+      DB.students = data.students || [];
+      DB.courses = data.courses || [];
+      initTeacherFilter();
+      initStudentFilter();
+      initTeacherSelect();
+      updateUndoButtons(data.canUndo, data.canRedo);
+      renderCurrentView();
+      if (currentPage === 'teachers') renderTeachersPage();
+      if (currentPage === 'settings') renderSettingsPage();
+    } else {
+      alert(data.error || '重做失败');
+    }
+  } catch (e) {
+    alert('重做操作失败: ' + e.message);
+  }
+}
+
+function updateUndoButtons(canUndo, canRedo) {
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  if (undoBtn) {
+    undoBtn.disabled = !canUndo;
+    undoBtn.style.opacity = canUndo ? '1' : '0.4';
+    undoBtn.style.cursor = canUndo ? 'pointer' : 'not-allowed';
+  }
+  if (redoBtn) {
+    redoBtn.disabled = !canRedo;
+    redoBtn.style.opacity = canRedo ? '1' : '0.4';
+    redoBtn.style.cursor = canRedo ? 'pointer' : 'not-allowed';
+  }
+}
+
+async function refreshUndoStatus() {
+  try {
+    const res = await fetch('/api/undo-status', { credentials: 'same-origin' });
+    const data = await res.json();
+    updateUndoButtons(data.canUndo, data.canRedo);
+  } catch (e) { /* 静默失败 */ }
+}
+
+function startUndoStatusPolling() {
+  refreshUndoStatus();
+  setInterval(refreshUndoStatus, 2000);
+}
+
+// 键盘快捷键
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    doUndo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    doRedo();
+  }
+});
 
 /* ---------- 登录/登出 ---------- */
 async function handleLogin() {
@@ -1047,6 +1142,7 @@ function enterApp() {
   applyPermission();
   switchView(currentView);
   renderCurrentView();
+  startUndoStatusPolling();
   // 老师选择变化时通过 onchange="handleTeacherChange()" 处理
 }
 
