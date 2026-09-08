@@ -836,6 +836,22 @@ a { color: var(--primary); text-decoration: none; }
   </div>
 </div>
 
+<!-- 删除重复课程选项对话框 -->
+<div class="modal-overlay" id="deleteRepeatModal" style="display:none;z-index:600;">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <h3 id="deleteRepeatTitle">删除重复排课</h3>
+      <button class="btn btn-sm" onclick="closeDeleteRepeatModal()">×</button>
+    </div>
+    <div class="modal-body" style="padding:20px;">
+      <p style="margin-bottom:16px;color:#555;">这是重复排课的课程，请选择删除范围：</p>
+      <div id="deleteRepeatOptions" style="display:flex;flex-direction:column;gap:10px;">
+        <!-- 动态生成 -->
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    排课平台 - 多人共享版
@@ -2883,11 +2899,14 @@ async function saveCourse() {
   if (editingCourseId) {
     const course = DB.courses.find(c => c.id === editingCourseId);
     if (course && course.repeatGroupId) {
-      const choice = confirm(
-        `这是重复排课中的一节。\n\n` +
-        `点击「确定」= 修改本次及之后所有同类课程\n` +
-        `点击「取消」= 仅修改这一次`
-      );
+      const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      const isWeekdayType = course.repeatType === 'weekly-weekdays';
+      const wd = isWeekdayType ? WEEKDAY_NAMES[new Date(course.date + 'T00:00:00').getDay()] : '';
+      
+      const msg = isWeekdayType
+        ? `这是重复排课中的一节（${wd}）。\n\n点击「确定」= 修改本节及之后所有${wd}的课程\n点击「取消」= 仅修改这一次`
+        : `这是重复排课中的一节。\n\n点击「确定」= 修改本次及之后所有同类课程\n点击「取消」= 仅修改这一次`;
+      const choice = confirm(msg);
       updateMode = choice ? 'all-future' : 'single';
     }
   }
@@ -2916,20 +2935,9 @@ async function deleteCurrentCourse() {
   const course = DB.courses.find(c => c.id === editingCourseId);
   if (!course) return;
   
-  // 如果是重复课程，提供删除选项
+  // 如果是重复课程，显示选项对话框
   if (course.repeatGroupId) {
-    const choice = confirm(`这是重复排课的课程。\n\n点击「确定」删除此课程及其所有重复项（全部周次）\n点击「取消」仅删除这一次`);
-    try {
-      if (choice) {
-        await api('/api/courses/' + editingCourseId + '?all=1', 'DELETE');
-      } else {
-        if (!confirm(`确定仅删除这一次「${course.name}」吗？`)) return;
-        await api('/api/courses/' + editingCourseId, 'DELETE');
-      }
-      closeCourseModal();
-    } catch (e) {
-      alert(e.message || '删除失败');
-    }
+    showDeleteRepeatModal(course);
     return;
   }
   
@@ -2938,6 +2946,95 @@ async function deleteCurrentCourse() {
     await api('/api/courses/' + editingCourseId, 'DELETE');
     closeCourseModal();
     // Socket.io 会自动推送删除事件
+  } catch (e) {
+    alert(e.message || '删除失败');
+  }
+}
+
+function closeDeleteRepeatModal() {
+  document.getElementById('deleteRepeatModal').style.display = 'none';
+}
+
+function showDeleteRepeatModal(course) {
+  const modal = document.getElementById('deleteRepeatModal');
+  const optionsDiv = document.getElementById('deleteRepeatOptions');
+  const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  
+  // 获取同组的所有课程
+  const groupCourses = DB.courses.filter(c => c.repeatGroupId === course.repeatGroupId);
+  
+  // 获取当前课程是星期几
+  const currentDay = new Date(course.date + 'T00:00:00').getDay();
+  const weekdayName = WEEKDAY_NAMES[currentDay];
+  
+  // 获取同组中各星期几的数量
+  const weekdayCounts = {};
+  groupCourses.forEach(c => {
+    const d = new Date(c.date + 'T00:00:00').getDay();
+    weekdayCounts[d] = (weekdayCounts[d] || 0) + 1;
+  });
+  
+  // 当前星期几的课程数量
+  const sameWeekdayCount = weekdayCounts[currentDay] || 0;
+  
+  let html = '';
+  
+  // 选项1：删除全部重复课程
+  html += `<button class="btn" style="text-align:left;padding:12px 16px;border:1px solid #ddd;border-radius:8px;justify-content:flex-start;" 
+    onclick="doDeleteRepeat('all')">
+    <div style="font-weight:600;color:#e03131;">删除全部重复课程</div>
+    <div style="font-size:12px;color:#888;margin-top:2px;">共 ${groupCourses.length} 节课，全部删除</div>
+  </button>`;
+  
+  // 选项2：删除同星期几的课程（只在同组有多个星期几时才显示）
+  const weekdayCount = Object.keys(weekdayCounts).length;
+  if (weekdayCount > 1 && sameWeekdayCount > 1) {
+    html += `<button class="btn" style="text-align:left;padding:12px 16px;border:1px solid #ddd;border-radius:8px;justify-content:flex-start;" 
+      onclick="doDeleteRepeat('weekday')">
+      <div style="font-weight:600;color:#e8590c;">删除所有${weekdayName}的课程</div>
+      <div style="font-size:12px;color:#888;margin-top:2px;">共 ${sameWeekdayCount} 节${weekdayName}的课，其他日期不受影响</div>
+    </button>`;
+  }
+  
+  // 选项3：仅删除这一次
+  html += `<button class="btn" style="text-align:left;padding:12px 16px;border:1px solid #ddd;border-radius:8px;justify-content:flex-start;" 
+    onclick="doDeleteRepeat('one')">
+    <div style="font-weight:600;color:#555;">仅删除这一次</div>
+    <div style="font-size:12px;color:#888;margin-top:2px;">只删除 ${course.date} 的这节课</div>
+  </button>`;
+  
+  optionsDiv.innerHTML = html;
+  modal.style.display = 'flex';
+}
+
+async function doDeleteRepeat(mode) {
+  const course = DB.courses.find(c => c.id === editingCourseId);
+  if (!course) return;
+  
+  let url = '/api/courses/' + editingCourseId;
+  let confirmMsg = '';
+  
+  if (mode === 'all') {
+    url += '?all=1';
+    confirmMsg = `确定删除全部重复课程吗？此操作不可撤销（可使用撤销按钮恢复）。`;
+  } else if (mode === 'weekday') {
+    url += '?weekday=1';
+    const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const wd = WEEKDAY_NAMES[new Date(course.date + 'T00:00:00').getDay()];
+    confirmMsg = `确定删除所有${wd}的课程吗？（共${DB.courses.filter(c => c.repeatGroupId === course.repeatGroupId && new Date(c.date + 'T00:00:00').getDay() === new Date(course.date + 'T00:00:00').getDay()).length}节）`;
+  } else {
+    confirmMsg = `确定仅删除 ${course.date} 的「${course.name}」吗？`;
+  }
+  
+  if (!confirm(confirmMsg)) return;
+  
+  try {
+    const res = await api(url, 'DELETE');
+    closeDeleteRepeatModal();
+    closeCourseModal();
+    if (res.deleted) {
+      // 批量删除成功
+    }
   } catch (e) {
     alert(e.message || '删除失败');
   }
@@ -3192,6 +3289,9 @@ document.getElementById('courseModal').addEventListener('click', e => {
 });
 document.getElementById('teacherModal').addEventListener('click', e => {
   if (e.target.id === 'teacherModal') closeTeacherModal();
+});
+document.getElementById('deleteRepeatModal').addEventListener('click', e => {
+  if (e.target.id === 'deleteRepeatModal') closeDeleteRepeatModal();
 });
 
 /* ---------- 初始化 ---------- */

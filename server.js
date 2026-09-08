@@ -473,8 +473,18 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
     const origDate = new Date(course.date + 'T00:00:00');
     const newDateRaw = date ? new Date(date + 'T00:00:00') : origDate;
     const dateOffsetDays = Math.round((newDateRaw - origDate) / 86400000);
+    const currentWeekday = origDate.getDay();
 
-    const groupCourses = DB.courses.filter(c => c.repeatGroupId === course.repeatGroupId && c.date >= course.date);
+    // 对于 weekly-weekdays 类型，只修改相同星期几的课程；其他类型修改全部
+    const isWeekdayType = course.repeatType === 'weekly-weekdays';
+    const groupCourses = DB.courses.filter(c => {
+      if (c.repeatGroupId !== course.repeatGroupId || c.date < course.date) return false;
+      if (isWeekdayType) {
+        // 只修改与当前课程相同星期几的课程
+        return new Date(c.date + 'T00:00:00').getDay() === currentWeekday;
+      }
+      return true;
+    });
     groupCourses.forEach(c => {
       const courseUpdates = { ...updates };
       if (c.id !== course.id && date) {
@@ -489,6 +499,12 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
       Object.assign(c, courseUpdates);
       updated.push(c);
     });
+    
+    // 如果是 weekly-weekdays 且没有任何同星期几的课程被修改（只有当前一节），也至少把当前课程加进去
+    if (updated.length === 0) {
+      Object.assign(course, updates);
+      updated.push(course);
+    }
   } else {
     Object.assign(course, updates);
     updated.push(course);
@@ -505,12 +521,23 @@ app.delete('/api/courses/:id', authRequired, (req, res) => {
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
   saveHistory();
   const deleteAll = req.query.all === '1' && course.repeatGroupId;
+  const deleteByWeekday = req.query.weekday === '1' && course.repeatGroupId;
   if (deleteAll) {
     // 删除同一重复组的所有课程
     const groupId = course.repeatGroupId;
     const toDelete = DB.courses.filter(c => c.repeatGroupId === groupId);
     const deleteIds = toDelete.map(c => c.id);
     DB.courses = DB.courses.filter(c => c.repeatGroupId !== groupId);
+    persist();
+    deleteIds.forEach(id => io.emit('course_deleted', { id }));
+    res.json({ ok: true, deleted: deleteIds.length });
+  } else if (deleteByWeekday) {
+    // 删除同一重复组中相同星期几的课程
+    const groupId = course.repeatGroupId;
+    const targetDay = new Date(course.date + 'T00:00:00').getDay();
+    const toDelete = DB.courses.filter(c => c.repeatGroupId === groupId && new Date(c.date + 'T00:00:00').getDay() === targetDay);
+    const deleteIds = toDelete.map(c => c.id);
+    DB.courses = DB.courses.filter(c => !deleteIds.includes(c.id));
     persist();
     deleteIds.forEach(id => io.emit('course_deleted', { id }));
     res.json({ ok: true, deleted: deleteIds.length });
