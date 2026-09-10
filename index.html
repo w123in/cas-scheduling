@@ -748,7 +748,7 @@ a { color: var(--primary); text-decoration: none; }
       <div class="form-row">
         <div class="form-group">
           <label>日期<span class="required">*</span></label>
-          <input type="date" id="courseDate">
+          <input type="date" id="courseDate" onchange="updateTimezonePreview()">
         </div>
         <div class="form-group">
           <label>授课老师<span class="required">*</span></label>
@@ -771,7 +771,7 @@ a { color: var(--primary); text-decoration: none; }
         </div>
       </div>
       <div class="form-group" id="timezoneGroup">
-        <label>排课参考时区</label>
+        <label>排课时区（选择你输入时间所属的时区）</label>
         <select id="courseTimezone" onchange="updateTimezonePreview()" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);outline:none;font-size:14px;">
         </select>
         <div id="timezonePreview" style="display:none;margin-top:8px;padding:10px 12px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;font-size:13px;"></div>
@@ -893,32 +893,76 @@ const COMMON_TIMEZONES = [
   { id: 'Pacific/Auckland',  label: '新西兰-奥克兰 (UTC+12/+13)' },
 ];
 
-/* 将北京时间(UTC+8)的日期+时间转换为目标时区的日期+时间 */
-function convertBeijingToTimezone(dateStr, timeStr, targetTz) {
-  if (!targetTz || targetTz === 'Asia/Shanghai') {
-    return { date: dateStr, time: timeStr };
-  }
+/* 通用时区转换：将 sourceTz 时区的 dateStr+timeStr 转换为 targetTz 时区的日期+时间 */
+function convertTimezone(dateStr, timeStr, sourceTz, targetTz) {
+  if (sourceTz === targetTz) return { date: dateStr, time: timeStr };
   try {
     const [y, m, d] = dateStr.split('-').map(Number);
     const [h, min] = timeStr.split(':').map(Number);
-    // 北京时间 = UTC+8，先转成 UTC 毫秒
-    const utcMs = Date.UTC(y, m - 1, d, h - 8, min);
-    const date = new Date(utcMs);
-    // 用目标时区格式化
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: targetTz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false
-    }).formatToParts(date);
-    const obj = {};
-    parts.forEach(p => { obj[p.type] = p.value; });
+    // 先把 sourceTz 的本地时间转成 UTC 毫秒
+    // Intl.DateTimeFormat 可以给出 sourceTz 当前的 UTC offset
+    const sourceDate = new Date(Date.UTC(y, m - 1, d, h, min));
+    // 获取 sourceTz 在该日期的 UTC offset（分钟）
+    const srcOffset = getTzOffsetMinutes(sourceDate, sourceTz);
+    // 减去 source offset 得到真正的 UTC 时间
+    const utcMs = sourceDate.getTime() - srcOffset * 60000;
+    const utcDate = new Date(utcMs);
+    // 获取 targetTz 的 UTC offset
+    const tgtOffset = getTzOffsetMinutes(utcDate, targetTz);
+    // 加上 target offset 得到 target 本地时间
+    const tgtMs = utcMs + tgtOffset * 60000;
+    const tgtDate = new Date(tgtMs);
     return {
-      date: `${obj.year}-${obj.month}-${obj.day}`,
-      time: `${obj.hour}:${obj.minute}`
+      date: tgtDate.getFullYear() + '-' + String(tgtDate.getMonth() + 1).padStart(2, '0') + '-' + String(tgtDate.getDate()).padStart(2, '0'),
+      time: String(tgtDate.getHours()).padStart(2, '0') + ':' + String(tgtDate.getMinutes()).padStart(2, '0')
     };
   } catch (e) {
     return { date: dateStr, time: timeStr };
   }
+}
+
+/* 获取某时区在指定日期的 UTC offset（分钟），考虑夏令时 */
+function getTzOffsetMinutes(date, tz) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      timeZoneName: 'shortOffset'
+    }).formatToParts(date);
+    const offsetPart = parts.find(p => p.type === 'timeZoneName');
+    if (offsetPart) {
+      // 格式如 GMT+8, GMT-5, GMT
+      const val = offsetPart.value.replace('GMT', '');
+      if (val === '' || val === 'Z') return 0;
+      const sign = val.startsWith('-') ? -1 : 1;
+      const numStr = val.replace(/[+-]/, '');
+      const [h, m] = numStr.split(':').map(Number);
+      return sign * (h * 60 + (m || 0));
+    }
+  } catch (e) {}
+  // 回退：用 longOffset
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'longOffset'
+    }).formatToParts(date);
+    const offsetPart = parts.find(p => p.type === 'timeZoneName');
+    if (offsetPart) {
+      const val = offsetPart.value.replace('GMT', '').replace('UTC', '');
+      if (val === '' || val === 'Z') return 0;
+      const sign = val.startsWith('-') ? -1 : 1;
+      const numStr = val.replace(/[+-]/, '');
+      const [h, m] = numStr.split(':').map(Number);
+      return sign * (h * 60 + (m || 0));
+    }
+  } catch (e) {}
+  return 0;
+}
+
+/* 将北京时间(UTC+8)的日期+时间转换为目标时区的日期+时间（兼容旧调用） */
+function convertBeijingToTimezone(dateStr, timeStr, targetTz) {
+  return convertTimezone(dateStr, timeStr, 'Asia/Shanghai', targetTz);
 }
 
 /* 获取时区的短名称（如 EDT、GMT+8） */
@@ -1616,12 +1660,7 @@ function updateTimezonePreview() {
   const preview = document.getElementById('timezonePreview');
   if (!tzSel || !preview) return;
   
-  const tz = tzSel.value;
-  if (!tz || tz === 'Asia/Shanghai') {
-    preview.style.display = 'none';
-    return;
-  }
-  
+  const tz = tzSel.value || 'Asia/Shanghai';
   const date = document.getElementById('courseDate').value;
   const start = getTimeValue('courseStart');
   const end = getTimeValue('courseEnd');
@@ -1631,28 +1670,44 @@ function updateTimezonePreview() {
     return;
   }
   
-  const localStart = convertBeijingToTimezone(date, start, tz);
-  const localEnd = convertBeijingToTimezone(date, end, tz);
+  // 计算另一个时区的时间
+  let beijingStart, beijingEnd, localStart, localEnd;
+  if (tz === 'Asia/Shanghai') {
+    // 排课时区就是北京时间，无需转换
+    beijingStart = { date, time: start };
+    beijingEnd = { date, time: end };
+    localStart = beijingStart;
+    localEnd = beijingEnd;
+  } else {
+    // 排课时区非北京：输入时间在 tz 时区，转换出北京时间
+    beijingStart = convertTimezone(date, start, tz, 'Asia/Shanghai');
+    beijingEnd = convertTimezone(date, end, tz, 'Asia/Shanghai');
+    localStart = { date, time: start };
+    localEnd = { date, time: end };
+  }
+  
   const tzName = getTimezoneShortName(tz);
   const tzOffset = getTimezoneOffset(tz);
+  const bjName = '北京时间';
+  const bjOffset = 'UTC+8';
   
-  const startDayDiff = localStart.date !== date;
-  const endDayDiff = localEnd.date !== date;
+  // 判断日期差异
+  const bjDateDiff = beijingStart.date !== localStart.date;
   
   let html = `<div style="display:flex;gap:16px;flex-wrap:wrap;">
-    <div style="flex:1;min-width:140px;">
-      <div style="font-weight:600;color:#1c7ed6;margin-bottom:2px;">老师时间（北京）</div>
-      <div>${date} ${start} - ${end}</div>
+    <div style="flex:1;min-width:160px;border-left:3px solid #1c7ed6;padding-left:10px;">
+      <div style="font-weight:600;color:#1c7ed6;margin-bottom:2px;">老师时间（${bjName}）</div>
+      <div style="font-size:13px;">${beijingStart.date} ${beijingStart.time} - ${beijingEnd.time}</div>
     </div>
-    <div style="flex:1;min-width:140px;">
-      <div style="font-weight:600;color:#e8590c;margin-bottom:2px;">学生时间（${escapeHtml(tzName)} ${escapeHtml(tzOffset)}）</div>
-      <div>${localStart.date} ${localStart.time} - ${localEnd.time}${startDayDiff || endDayDiff ? '' : ''}</div>
+    <div style="flex:1;min-width:160px;border-left:3px solid #e8590c;padding-left:10px;">
+      <div style="font-weight:600;color:#e8590c;margin-bottom:2px;">排课时区（${escapeHtml(tzName)} ${escapeHtml(tzOffset)}）</div>
+      <div style="font-size:13px;">${localStart.date} ${localStart.time} - ${localEnd.time}</div>
     </div>
   </div>`;
   
-  if (startDayDiff || endDayDiff) {
-    const dayLabel = startDayDiff ? (localStart.date > date ? '学生当地为次日' : '学生当地为前日') : '';
-    html += `<div style="margin-top:4px;color:#d9480f;font-size:12px;">注意：${dayLabel}</div>`;
+  if (bjDateDiff) {
+    const diff = beijingStart.date > localStart.date ? '老师时间为次日' : '老师时间为前日';
+    html += `<div style="margin-top:6px;color:#d9480f;font-size:12px;font-weight:600;">注意：${diff}</div>`;
   }
   
   preview.innerHTML = html;
@@ -2217,16 +2272,67 @@ function renderStudentSchedule() {
   // 过滤范围内的课程
   const startStr = formatDateStr(rangeStart);
   const endStr = formatDateStr(rangeEnd);
-  const courses = allCourses.filter(c => c.date >= startStr && c.date <= endStr);
+  
+  // 获取学生时区
+  const studentTz = student ? (student.timezone || 'Asia/Shanghai') : 'Asia/Shanghai';
+  
+  // 判断是否有跨时区课程（排课时区与学生时区不同）
+  const hasCourseTz = allCourses.some(c => (c.timezone || 'Asia/Shanghai') !== studentTz);
 
-  // 按日期分组（仅范围内课程）
+  // 按学生当地日期分组课程
+  // 课程存储的 date/time 是排课时区的值，需要转成学生当地时区的日期来分组
   const courseMap = {};
-  courses.forEach(c => {
-    if (!courseMap[c.date]) courseMap[c.date] = [];
-    courseMap[c.date].push(c);
+  allCourses.forEach(c => {
+    // 只处理范围附近的课程（含前后1天缓冲，因为时差可能导致跨日）
+    if (c.date < startStr || c.date > endStr) {
+      // 也要检查转换后的日期是否在范围内
+      const courseTz = c.timezone || 'Asia/Shanghai';
+      if (courseTz !== studentTz) {
+        const converted = convertTimezone(c.date, c.startTime, courseTz, studentTz);
+        if (converted.date < startStr || converted.date > endStr) return;
+      } else {
+        return;
+      }
+    }
+    
+    const courseTz = c.timezone || 'Asia/Shanghai';
+    let localDate, localStart, localEnd, bjStart, bjEnd;
+    
+    if (courseTz === studentTz) {
+      // 排课时区和学生时区相同，无需转换
+      localDate = c.date;
+      localStart = { date: c.date, time: c.startTime };
+      localEnd = { date: c.date, time: c.endTime };
+      bjStart = studentTz === 'Asia/Shanghai' ? localStart : convertTimezone(c.date, c.startTime, courseTz, 'Asia/Shanghai');
+      bjEnd = studentTz === 'Asia/Shanghai' ? localEnd : convertTimezone(c.date, c.endTime, courseTz, 'Asia/Shanghai');
+    } else {
+      // 排课时区与学生时区不同，转换到学生当地时间
+      const converted = convertTimezone(c.date, c.startTime, courseTz, studentTz);
+      const convertedEnd = convertTimezone(c.date, c.endTime, courseTz, studentTz);
+      localDate = converted.date;
+      localStart = converted;
+      localEnd = convertedEnd;
+      // 也计算北京时间
+      bjStart = convertTimezone(c.date, c.startTime, courseTz, 'Asia/Shanghai');
+      bjEnd = convertTimezone(c.date, c.endTime, courseTz, 'Asia/Shanghai');
+    }
+    
+    // 用学生当地日期作为分组键
+    if (!courseMap[localDate]) courseMap[localDate] = [];
+    courseMap[localDate].push({
+      course: c,
+      localDate,
+      localStart,
+      localEnd,
+      bjStart,
+      bjEnd,
+      courseTz
+    });
   });
+  
+  // 按学生当地时间排序
   Object.keys(courseMap).forEach(d => {
-    courseMap[d].sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
+    courseMap[d].sort((a, b) => parseTimeToMinutes(a.localStart.time) - parseTimeToMinutes(b.localStart.time));
   });
 
   // 从rangeStart所在周的周一开始，到rangeEnd所在周的周日结束
@@ -2252,12 +2358,12 @@ function renderStudentSchedule() {
 
   const WEEK_HEADERS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const today = new Date();
-  const totalCourses = courses.length;
-  // 判断是否有任何课程设置了非中国时区
-  const hasCourseTz = courses.some(c => c.timezone && c.timezone !== 'Asia/Shanghai');
+  
+  // 获取学生时区名称
+  const studentTzName = studentTz !== 'Asia/Shanghai' ? getTimezoneShortName(studentTz) : '北京';
 
   let html = `<div class="student-schedule-wrap">
-    <div class="ss-title">${titleStr}${hasCourseTz ? `<div style="font-size:12px;color:#996600;margin-top:4px;">含跨时区课程：蓝色=老师时间(北京) / 橙色=学生当地时间</div>` : ''}</div>
+    <div class="ss-title">${titleStr}${hasCourseTz ? `<div style="font-size:12px;color:#996600;margin-top:4px;">课表按学生当地时间（${escapeHtml(studentTzName)}）排列 · 蓝色=老师时间(北京) / 橙色=学生当地时间</div>` : ''}</div>
     <table class="ss-table">
       <thead>
         <tr>
@@ -2289,22 +2395,21 @@ function renderStudentSchedule() {
       const dateStr = formatDateStr(d);
       const dayCourses = courseMap[dateStr] || [];
       let cellHtml = '';
-      dayCourses.forEach(c => {
+      dayCourses.forEach(item => {
+        const c = item.course;
         const teacher = getTeacherById(c.teacherId);
         const teacherColor = c.teacherId === 'guest' ? '#1c2d5a' : (teacher ? teacher.color : '#333');
         const teacherName = getTeacherShortName(c);
         const isCancelled = c.status === 'cancelled';
-        // 课程有设置非中国时区时，分两行显示老师时间和学生时间
-        const courseTz = c.timezone && c.timezone !== 'Asia/Shanghai' ? c.timezone : null;
+        
         let timeHtml = '';
-        if (courseTz) {
-          const cTzName = getTimezoneShortName(courseTz);
-          const localStart = convertBeijingToTimezone(c.date, c.startTime, courseTz);
-          const localEnd = convertBeijingToTimezone(c.date, c.endTime, courseTz);
+        if (item.courseTz !== 'Asia/Shanghai' || studentTz !== 'Asia/Shanghai') {
+          // 有跨时区情况，分两行显示
           // 老师行（北京时间）
-          timeHtml = `<div class="ss-time" style="color:#1c7ed6;">老师 ${c.startTime}-${c.endTime} (北京)</div>`;
+          timeHtml = `<div class="ss-time" style="color:#1c7ed6;">老师 ${item.bjStart.time}-${item.bjEnd.time} (北京)</div>`;
           // 学生行（当地时间）
-          timeHtml += `<div class="ss-time" style="color:#e8590c;">学生 ${localStart.time}-${localEnd.time} (${escapeHtml(cTzName)})</div>`;
+          const localTzName = getTimezoneShortName(studentTz);
+          timeHtml += `<div class="ss-time" style="color:#e8590c;">学生 ${item.localStart.time}-${item.localEnd.time} (${escapeHtml(localTzName)})</div>`;
         } else {
           timeHtml = `<div class="ss-time">${c.startTime}-${c.endTime}</div>`;
         }
@@ -2321,7 +2426,7 @@ function renderStudentSchedule() {
   // 底部备注
   const tzNoteHtml = hasCourseTz ? `
     <div style="margin-top:8px;padding:8px 12px;background:#fff8e6;border:1px solid #ffe08a;border-radius:6px;font-size:12px;color:#996600;">
-      <strong>时区说明：</strong>蓝色行为老师上课时间（中国时间 UTC+8），橙色行为学生当地时区时间。排课时区在每节课创建时单独设置，学生回国后可将时区选为中国。
+      <strong>时区说明：</strong>课表按学生当地时间排列，课程出现在学生当地的日期格子内。蓝色行为老师上课时间（中国时间 UTC+8），橙色行为学生当地时区时间。排课时区在每节课创建时单独设置。
     </div>` : '';
   
   html += `</tbody>
@@ -3454,15 +3559,27 @@ function exportCSV() {
 
   const startStr = formatDateStr(startDate);
   const endStr = formatDateStr(endDate);
-  let list = DB.courses.filter(c => c.date >= startStr && c.date <= endStr);
+  const studentTz = studentFilter ? getStudentTimezone(studentFilter) : 'Asia/Shanghai';
+  // 过滤课程：考虑时区转换后可能在范围内的课程
+  let list = DB.courses.filter(c => {
+    if (c.date < startStr || c.date > endStr) {
+      // 课程原始日期不在范围，检查转换后是否在范围内
+      const courseTz = c.timezone || 'Asia/Shanghai';
+      if (courseTz !== studentTz) {
+        const converted = convertTimezone(c.date, c.startTime, courseTz, studentTz);
+        if (converted.date < startStr || converted.date > endStr) return false;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  });
   if (teacherFilter) list = list.filter(c => c.teacherId === teacherFilter);
   if (studentFilter) list = list.filter(c => c.studentIds && c.studentIds.includes(studentFilter));
   list.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
 
-  const studentTz = studentFilter ? getStudentTimezone(studentFilter) : 'Asia/Shanghai';
-  
   // 判断是否有跨时区课程
-  const hasTzCourses = list.some(c => c.timezone && c.timezone !== 'Asia/Shanghai');
+  const hasTzCourses = list.some(c => (c.timezone || 'Asia/Shanghai') !== studentTz);
   
   let headers, rows;
   
@@ -3473,26 +3590,28 @@ function exportCSV() {
     list.forEach(c => {
       const teacher = getTeacherById(c.teacherId);
       const teacherName = studentFilter ? getTeacherShortName(c) : getTeacherDisplayName(c);
-      const wd = WEEK_NAMES[dateFromStr(c.date).getDay()];
       const studentNames = (c.studentIds || []).map(sid => {
         const s = DB.students.find(x => x.id === sid);
         return s ? s.name : '';
       }).filter(Boolean).join('、');
       
-      const courseTz = c.timezone && c.timezone !== 'Asia/Shanghai' ? c.timezone : 'Asia/Shanghai';
+      const courseTz = c.timezone || 'Asia/Shanghai';
+      
+      // 计算北京时间和学生当地时间
+      const bjStart = convertTimezone(c.date, c.startTime, courseTz, 'Asia/Shanghai');
+      const bjEnd = convertTimezone(c.date, c.endTime, courseTz, 'Asia/Shanghai');
+      const localStart = convertTimezone(c.date, c.startTime, courseTz, studentTz);
+      const localEnd = convertTimezone(c.date, c.endTime, courseTz, studentTz);
+      const bjWd = WEEK_NAMES[dateFromStr(bjStart.date).getDay()];
+      const localWd = WEEK_NAMES[dateFromStr(localStart.date).getDay()];
+      const localTzName = getTimezoneShortName(studentTz);
+      const localTzOffset = getTimezoneOffset(studentTz);
       
       // 老师行（北京时间）
-      rows.push([c.name, '老师(北京)', c.date, wd, c.startTime, c.endTime, 'UTC+8', c.location || '', teacherName, studentNames, c.description || '', c.color]);
+      rows.push([c.name, '老师(北京)', bjStart.date, bjWd, bjStart.time, bjEnd.time, 'UTC+8', c.location || '', teacherName, studentNames, c.description || '', c.color]);
       
-      // 学生行（当地时间）— 只在课程有非中国时区时输出
-      if (courseTz !== 'Asia/Shanghai') {
-        const cTzName = getTimezoneShortName(courseTz);
-        const cTzOffset = getTimezoneOffset(courseTz);
-        const localStart = convertBeijingToTimezone(c.date, c.startTime, courseTz);
-        const localEnd = convertBeijingToTimezone(c.date, c.endTime, courseTz);
-        const localWd = WEEK_NAMES[dateFromStr(localStart.date).getDay()];
-        rows.push([c.name, '学生(' + cTzName + ')', localStart.date, localWd, localStart.time, localEnd.time, cTzOffset, c.location || '', teacherName, studentNames, c.description || '', c.color]);
-      }
+      // 学生行（当地时间）
+      rows.push([c.name, '学生(' + localTzName + ')', localStart.date, localWd, localStart.time, localEnd.time, localTzOffset, c.location || '', teacherName, studentNames, c.description || '', c.color]);
     });
   } else {
     // 普通模式：一行一节课
