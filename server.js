@@ -599,15 +599,14 @@ app.post('/api/students', authRequired, (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'admin only' });
   }
-  const { name, timezone } = req.body;
+  const { name } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: '学生姓名不能为空' });
   }
   saveHistory();
   const student = {
     id: 's' + Date.now() + Math.random().toString(36).substr(2, 4),
-    name: name.trim(),
-    timezone: timezone || 'Asia/Shanghai'
+    name: name.trim()
   };
   DB.students.push(student);
   persist();
@@ -622,9 +621,8 @@ app.put('/api/students/:id', authRequired, (req, res) => {
   const student = DB.students.find(s => s.id === req.params.id);
   if (!student) return res.status(404).json({ error: 'student not found' });
   saveHistory();
-  const { name, timezone } = req.body;
+  const { name } = req.body;
   if (name) student.name = name.trim();
-  if (timezone) student.timezone = timezone;
   persist();
   io.emit('student_updated', student);
   res.json(student);
