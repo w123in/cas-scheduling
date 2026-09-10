@@ -268,6 +268,15 @@ function destroySession(sid) {
 /* ---------- Middleware ---------- */
 app.use(express.json());
 app.use(cookieParser());
+// HTML文件不缓存，确保用户总是获取最新版本
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 app.use(express.static(__dirname));
 
 function authRequired(req, res, next) {

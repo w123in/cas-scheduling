@@ -391,7 +391,7 @@ a { color: var(--primary); text-decoration: none; }
   min-height: 50px;
 }
 .ss-course {
-  text-align: left;
+  text-align: center;
   padding: 3px 0;
   line-height: 1.4;
 }
@@ -3610,39 +3610,37 @@ function exportImage() {
   }
   const fileName = '排课_' + rangeLabel + fileSuffix + '.png';
 
-  // 导出前临时移除overflow和height限制，确保完整捕获
-  const wrapEl = container.querySelector('.student-schedule-wrap');
-  const oldOverflow = wrapEl ? wrapEl.style.overflow : '';
-  if (wrapEl) wrapEl.style.overflow = 'visible';
-  const oldContainerOverflow = container.style.overflowY;
-  container.style.overflowY = 'visible';
-  const oldContainerHeight = container.style.height;
-  container.style.height = 'auto';
-  // 移除内容单元格的固定高度限制
-  const allCells = container.querySelectorAll('.ss-content-cell');
-  const oldCellHeights = [];
-  allCells.forEach((cell, i) => {
-    oldCellHeights[i] = cell.style.height;
-    cell.style.height = 'auto';
-    cell.style.minHeight = '50px';
-  });
-
+  // 使用克隆方式导出，避免父容器 overflow:hidden 截断内容
   setTimeout(() => {
-    html2canvas(container, {
+    // 克隆排课内容到临时容器，脱离所有限制
+    const cloneContainer = document.createElement('div');
+    cloneContainer.style.cssText = 'position:absolute;left:-99999px;top:0;width:' + container.offsetWidth + 'px;background:#fff;padding:0;overflow:visible;';
+    // 克隆学生排课表或日历内容
+    const wrapEl = container.querySelector('.student-schedule-wrap');
+    if (wrapEl) {
+      cloneContainer.appendChild(wrapEl.cloneNode(true));
+    } else {
+      cloneContainer.innerHTML = container.innerHTML;
+    }
+    document.body.appendChild(cloneContainer);
+
+    // 临时移除克隆内所有固定高度限制
+    cloneContainer.querySelectorAll('.ss-content-cell').forEach(cell => {
+      cell.style.height = 'auto';
+      cell.style.minHeight = '50px';
+    });
+
+    html2canvas(cloneContainer, {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
-      scrollX: 0,
-      scrollY: 0,
-      windowWidth: container.scrollWidth,
-      windowHeight: container.scrollHeight,
-      height: container.scrollHeight,
-      width: container.scrollWidth
+      logging: false,
+      width: cloneContainer.scrollWidth,
+      height: cloneContainer.scrollHeight,
+      windowWidth: cloneContainer.scrollWidth,
+      windowHeight: cloneContainer.scrollHeight
     }).then(canvas => {
-      if (wrapEl) wrapEl.style.overflow = oldOverflow;
-      container.style.overflowY = oldContainerOverflow;
-      container.style.height = oldContainerHeight;
-      allCells.forEach((cell, i) => { cell.style.height = oldCellHeights[i]; });
+      document.body.removeChild(cloneContainer);
       canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -3655,10 +3653,7 @@ function exportImage() {
         document.body.removeChild(overlay);
       });
     }).catch(err => {
-      if (wrapEl) wrapEl.style.overflow = oldOverflow;
-      container.style.overflowY = oldContainerOverflow;
-      container.style.height = oldContainerHeight;
-      allCells.forEach((cell, i) => { cell.style.height = oldCellHeights[i]; });
+      document.body.removeChild(cloneContainer);
       document.body.removeChild(overlay);
       alert('导出图片失败：' + err.message);
     });
@@ -3698,6 +3693,11 @@ document.getElementById('deleteRepeatModal').addEventListener('click', e => {
 });
 
 /* ---------- 初始化 ---------- */
+// 页面关闭/刷新前自动保存状态（备份机制）
+window.addEventListener('beforeunload', () => {
+  if (currentUser) saveAppState();
+});
+
 (async () => {
   const loggedIn = await checkSession();
   if (loggedIn) {
