@@ -340,7 +340,7 @@ app.get('/api/data', authRequired, (req, res) => {
 });
 
 app.post('/api/courses', authRequired, (req, res) => {
-  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, repeat, weekdays, studentIds, repeatEndDate } = req.body;
+  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, repeat, weekdays, studentIds, repeatEndDate, timezone } = req.body;
   if (!name || !date || !startTime || !endTime || !teacherId) {
     return res.status(400).json({ error: 'missing required fields' });
   }
@@ -360,7 +360,8 @@ app.post('/api/courses', authRequired, (req, res) => {
     color,
     createdBy: req.user.username,
     studentIds: studentIds || [],
-    status: 'normal'
+    status: 'normal',
+    timezone: timezone || 'Asia/Shanghai'
   };
 
   // 重复排课：none=仅一次, weekly=每周, biweekly=隔周, weekly-weekdays=按星期几
@@ -447,7 +448,7 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
   if (!course) return res.status(404).json({ error: 'course not found' });
   if (!canEditCourse(req.user, course)) return res.status(403).json({ error: 'no permission' });
   saveHistory();
-  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, studentIds, status } = req.body;
+  const { name, date, startTime, endTime, location, teacherId, guestTeacherName, description, studentIds, status, timezone } = req.body;
   const newTeacherId = teacherId || course.teacherId;
   const teacher = DB.teachers.find(t => t.id === newTeacherId);
   const newColor = newTeacherId === 'guest' ? PART_TIME_COLOR : (teacher ? teacher.color : course.color);
@@ -463,7 +464,8 @@ app.put('/api/courses/:id', authRequired, (req, res) => {
     description: description !== undefined ? description : course.description,
     color: newColor,
     studentIds: studentIds !== undefined ? studentIds : (course.studentIds || []),
-    status: status !== undefined ? status : (course.status || 'normal')
+    status: status !== undefined ? status : (course.status || 'normal'),
+    timezone: timezone || course.timezone || 'Asia/Shanghai'
   };
 
   // 批量修改：当前课程及之后所有同组课程
