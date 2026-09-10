@@ -862,6 +862,112 @@ const DAY_START = 7;   // 日视图起始小时
 const DAY_END = 22;    // 日视图结束小时
 const HOUR_HEIGHT = 56; // 每小时像素高度
 
+/* ---------- 时区配置 ---------- */
+const COMMON_TIMEZONES = [
+  { id: 'Asia/Shanghai',       label: '中国 (UTC+8)' },
+  { id: 'America/New_York',    label: '美国东部-纽约 (UTC-5/-4)' },
+  { id: 'America/Chicago',    label: '美国中部-芝加哥 (UTC-6/-5)' },
+  { id: 'America/Denver',     label: '美国山地-丹佛 (UTC-7/-6)' },
+  { id: 'America/Los_Angeles', label: '美国西部-洛杉矶 (UTC-8/-7)' },
+  { id: 'America/Anchorage',  label: '美国阿拉斯加 (UTC-9/-8)' },
+  { id: 'America/Toronto',    label: '加拿大东部-多伦多 (UTC-5/-4)' },
+  { id: 'America/Vancouver',  label: '加拿大西部-温哥华 (UTC-8/-7)' },
+  { id: 'Europe/London',      label: '英国-伦敦 (UTC+0/+1)' },
+  { id: 'Europe/Paris',      label: '法国-巴黎 (UTC+1/+2)' },
+  { id: 'Europe/Berlin',     label: '德国-柏林 (UTC+1/+2)' },
+  { id: 'Europe/Moscow',     label: '俄罗斯-莫斯科 (UTC+3)' },
+  { id: 'Asia/Tokyo',        label: '日本-东京 (UTC+9)' },
+  { id: 'Asia/Seoul',        label: '韩国-首尔 (UTC+9)' },
+  { id: 'Asia/Singapore',    label: '新加坡 (UTC+8)' },
+  { id: 'Asia/Hong_Kong',    label: '中国香港 (UTC+8)' },
+  { id: 'Asia/Taipei',       label: '中国台北 (UTC+8)' },
+  { id: 'Asia/Bangkok',      label: '泰国-曼谷 (UTC+7)' },
+  { id: 'Asia/Dubai',        label: '阿联酋-迪拜 (UTC+4)' },
+  { id: 'Australia/Sydney',  label: '澳大利亚-悉尼 (UTC+10/+11)' },
+  { id: 'Australia/Melbourne',label: '澳大利亚-墨尔本 (UTC+10/+11)' },
+  { id: 'Pacific/Auckland',  label: '新西兰-奥克兰 (UTC+12/+13)' },
+];
+
+/* 将北京时间(UTC+8)的日期+时间转换为目标时区的日期+时间 */
+function convertBeijingToTimezone(dateStr, timeStr, targetTz) {
+  if (!targetTz || targetTz === 'Asia/Shanghai') {
+    return { date: dateStr, time: timeStr };
+  }
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [h, min] = timeStr.split(':').map(Number);
+    // 北京时间 = UTC+8，先转成 UTC 毫秒
+    const utcMs = Date.UTC(y, m - 1, d, h - 8, min);
+    const date = new Date(utcMs);
+    // 用目标时区格式化
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: targetTz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(date);
+    const obj = {};
+    parts.forEach(p => { obj[p.type] = p.value; });
+    return {
+      date: `${obj.year}-${obj.month}-${obj.day}`,
+      time: `${obj.hour}:${obj.minute}`
+    };
+  } catch (e) {
+    return { date: dateStr, time: timeStr };
+  }
+}
+
+/* 获取时区的短名称（如 EDT、GMT+8） */
+function getTimezoneShortName(tz) {
+  if (!tz || tz === 'Asia/Shanghai') return '北京时间';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'short'
+    }).formatToParts(new Date());
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    return tzPart ? tzPart.value : tz;
+  } catch (e) {
+    return tz;
+  }
+}
+
+/* 获取时区的 UTC 偏移量标签（如 UTC+8、UTC-4） */
+function getTimezoneOffset(tz) {
+  if (!tz || tz === 'Asia/Shanghai') return 'UTC+8';
+  try {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'longOffset'
+    }).formatToParts(now);
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    if (tzPart) return tzPart.value.replace('GMT', 'UTC');
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/* 获取时区的友好名称 */
+function getTimezoneLabel(tz) {
+  if (!tz) return '中国 (UTC+8)';
+  const found = COMMON_TIMEZONES.find(t => t.id === tz);
+  if (found) return found.label;
+  return tz;
+}
+
+/* 获取学生时区，默认中国 */
+function getStudentTimezone(studentId) {
+  const s = DB.students.find(x => x.id === studentId);
+  return s && s.timezone ? s.timezone : 'Asia/Shanghai';
+}
+
+/* 判断学生是否在海外（非中国时区） */
+function isOverseasStudent(studentId) {
+  const tz = getStudentTimezone(studentId);
+  return tz && tz !== 'Asia/Shanghai';
+}
+
 // 颜色方案 — 10种高区分度颜色 + 兼职灰
 const COLORS = [
   { name: '红色',   value: '#e03131', bg: '#fde8e8', text: '#c92a2a' },
@@ -1283,7 +1389,8 @@ function initStudentFilter() {
   DB.students.forEach(s => {
     const opt = document.createElement('option');
     opt.value = s.id;
-    opt.textContent = s.name;
+    const tzLabel = s.timezone && s.timezone !== 'Asia/Shanghai' ? ' [' + getTimezoneShortName(s.timezone) + ']' : '';
+    opt.textContent = s.name + tzLabel;
     sel.appendChild(opt);
   });
 }
@@ -2007,9 +2114,13 @@ function renderStudentSchedule() {
   const WEEK_HEADERS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const today = new Date();
   const totalCourses = courses.length;
+  const studentTz = getStudentTimezone(studentFilter);
+  const isOverseas = isOverseasStudent(studentFilter);
+  const tzShortName = getTimezoneShortName(studentTz);
+  const tzOffset = getTimezoneOffset(studentTz);
 
   let html = `<div class="student-schedule-wrap">
-    <div class="ss-title">${titleStr}</div>
+    <div class="ss-title">${titleStr}${isOverseas ? `<div style="font-size:12px;color:#996600;margin-top:4px;">时区：中国时间(UTC+8) / ${escapeHtml(tzShortName)} ${escapeHtml(tzOffset)}</div>` : ''}</div>
     <table class="ss-table">
       <thead>
         <tr>
@@ -2046,8 +2157,17 @@ function renderStudentSchedule() {
         const teacherColor = c.teacherId === 'guest' ? '#1c2d5a' : (teacher ? teacher.color : '#333');
         const teacherName = getTeacherShortName(c);
         const isCancelled = c.status === 'cancelled';
+        // 海外学生显示双时区时间
+        let timeHtml = `<div class="ss-time">${c.startTime}-${c.endTime}</div>`;
+        if (isOverseas) {
+          const localConverted = convertBeijingToTimezone(c.date, c.startTime, studentTz);
+          const localEndConverted = convertBeijingToTimezone(c.date, c.endTime, studentTz);
+          const localDateChanged = localConverted.date !== c.date;
+          timeHtml = `<div class="ss-time">${c.startTime}-${c.endTime} <span style="color:#e8590c;font-size:11px;">(北京时间)</span></div>`;
+          timeHtml += `<div class="ss-time" style="color:#666;font-size:11px;">${localConverted.time}-${localEndConverted.time} <span style="color:#e8590c;">(${tzShortName})</span>${localDateChanged ? ' <span style="color:#d9480f;">次日</span>' : ''}</div>`;
+        }
         cellHtml += `<div class="ss-course" style="color:${isCancelled ? '#999' : teacherColor};${isCancelled ? 'text-decoration:line-through;' : ''}">
-          <div class="ss-time">${c.startTime}-${c.endTime}</div>
+          ${timeHtml}
           <div class="ss-info">${escapeHtml(teacherName)} ${escapeHtml(c.name)}</div>
         </div>`;
       });
@@ -2057,8 +2177,14 @@ function renderStudentSchedule() {
   });
 
   // 底部备注
+  const tzNoteHtml = isOverseas ? `
+    <div style="margin-top:8px;padding:8px 12px;background:#fff8e6;border:1px solid #ffe08a;border-radius:6px;font-size:12px;color:#996600;">
+      <strong>时区说明：</strong>课表时间为中国时间(UTC+8)，括号内为学生当地时区时间（${escapeHtml(tzShortName)} ${escapeHtml(tzOffset)}）。如标注"次日"，表示在当地为第二天。
+    </div>` : '';
+  
   html += `</tbody>
     </table>
+    ${tzNoteHtml}
     <div class="ss-notes">
       <div class="ss-notes-title">拟定学员作品集排课表：</div>
       <div class="ss-notes-content">
@@ -2419,7 +2545,7 @@ function renderStudentList() {
         <div style="width:28px;height:28px;border-radius:50%;background:#6c8eef;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;">${s.name.charAt(s.name.length-1)}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name)}</div>
-          <div style="font-size:11px;color:var(--text-muted);">${courseCount} 节课</div>
+          <div style="font-size:11px;color:var(--text-muted);">${courseCount} 节课${s.timezone && s.timezone !== 'Asia/Shanghai' ? ' · ' + escapeHtml(getTimezoneShortName(s.timezone)) : ''}</div>
         </div>
       </div>
       <div style="display:flex;gap:4px;margin-top:6px;">
@@ -2437,25 +2563,95 @@ function renderStudentList() {
 
 /* ---------- 学生管理（内联编辑） ---------- */
 async function addStudentInline() {
-  const name = prompt('请输入学生姓名');
-  if (!name || !name.trim()) return;
-  try {
-    await api('/api/students', 'POST', { name: name.trim() });
-  } catch (e) {
-    alert(e.message || '添加失败');
-  }
+  showStudentModal(null);
 }
 
 async function editStudentInline(studentId) {
+  showStudentModal(studentId);
+}
+
+function showStudentModal(studentId) {
+  const isEdit = !!studentId;
+  const student = isEdit ? DB.students.find(s => s.id === studentId) : null;
+  const currentTz = student && student.timezone ? student.timezone : 'Asia/Shanghai';
+  
+  // 移除已有弹窗
+  const old = document.getElementById('studentEditModal');
+  if (old) old.remove();
+  
+  const tzOptions = COMMON_TIMEZONES.map(t => 
+    `<option value="${t.id}" ${t.id === currentTz ? 'selected' : ''}>${t.label}</option>`
+  ).join('');
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'studentEditModal';
+  modal.style.cssText = 'display:flex;z-index:600;';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <h3>${isEdit ? '编辑学生' : '添加学生'}</h3>
+        <button class="btn btn-sm" onclick="document.getElementById('studentEditModal').remove()">×</button>
+      </div>
+      <div class="modal-body" style="padding:20px;">
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">姓名</label>
+          <input type="text" id="studentEditName" value="${student ? escapeHtml(student.name) : ''}" placeholder="请输入学生姓名"
+            style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">时区</label>
+          <select id="studentEditTz" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;">
+            ${tzOptions}
+          </select>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">排课时间默认为中国时间(UTC+8)，此处选择学生所在地时区后，学生课表将显示双时区时间</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        ${isEdit ? `<button class="btn btn-danger" style="margin-right:auto;" onclick="deleteStudentFromModal('${studentId}')">删除</button>` : ''}
+        <button class="btn" onclick="document.getElementById('studentEditModal').remove()">取消</button>
+        <button class="btn btn-primary" onclick="saveStudentFromModal(${isEdit ? `'${studentId}'` : 'null'})">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => {
+    if (e.target === modal) modal.remove();
+  });
+  // 聚焦姓名输入框
+  setTimeout(() => {
+    const nameInput = document.getElementById('studentEditName');
+    if (nameInput) nameInput.focus();
+  }, 50);
+}
+
+async function saveStudentFromModal(studentId) {
+  const name = document.getElementById('studentEditName').value.trim();
+  const tz = document.getElementById('studentEditTz').value;
+  
+  if (!name) { alert('姓名不能为空'); return; }
+  
+  try {
+    if (studentId && studentId !== 'null') {
+      await api('/api/students/' + studentId, 'PUT', { name, timezone: tz });
+    } else {
+      await api('/api/students', 'POST', { name, timezone: tz });
+    }
+    document.getElementById('studentEditModal').remove();
+  } catch (e) {
+    alert(e.message || '保存失败');
+  }
+}
+
+async function deleteStudentFromModal(studentId) {
   const student = DB.students.find(s => s.id === studentId);
   if (!student) return;
-  const name = prompt('修改学生姓名', student.name);
-  if (name === null) return;
-  if (!name.trim()) { alert('姓名不能为空'); return; }
+  if (!confirm(`确定删除学生「${student.name}」吗？\n该学生将从所有关联课程中移除。`)) return;
   try {
-    await api('/api/students/' + studentId, 'PUT', { name: name.trim() });
+    await api('/api/students/' + studentId, 'DELETE');
+    document.getElementById('studentEditModal').remove();
   } catch (e) {
-    alert(e.message || '修改失败');
+    alert(e.message || '删除失败');
   }
 }
 
@@ -3112,7 +3308,15 @@ function exportCSV() {
   if (studentFilter) list = list.filter(c => c.studentIds && c.studentIds.includes(studentFilter));
   list.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
 
-  const headers = ['课程名称','日期','星期','开始时间','结束时间','地点','授课老师','关联学生','描述','颜色'];
+  const studentTz = studentFilter ? getStudentTimezone(studentFilter) : 'Asia/Shanghai';
+  const isOverseas = studentFilter && isOverseasStudent(studentFilter);
+  
+  let headers = ['课程名称','日期','星期','开始时间','结束时间','地点','授课老师','关联学生','描述','颜色'];
+  if (isOverseas) {
+    const tzName = getTimezoneShortName(studentTz);
+    headers = ['课程名称','日期','星期','开始时间(北京)','结束时间(北京)','开始时间(' + tzName + ')','结束时间(' + tzName + ')','当地日期','地点','授课老师','关联学生','描述','颜色'];
+  }
+
   const rows = list.map(c => {
     const teacher = getTeacherById(c.teacherId);
     const teacherName = studentFilter ? getTeacherShortName(c) : getTeacherDisplayName(c);
@@ -3121,6 +3325,16 @@ function exportCSV() {
       const s = DB.students.find(x => x.id === sid);
       return s ? s.name : '';
     }).filter(Boolean).join('、');
+    
+    if (isOverseas) {
+      const localStart = convertBeijingToTimezone(c.date, c.startTime, studentTz);
+      const localEnd = convertBeijingToTimezone(c.date, c.endTime, studentTz);
+      const localDateChanged = localStart.date !== c.date;
+      return [c.name, c.date, wd, c.startTime, c.endTime, localStart.time, localEnd.time, 
+        localStart.date + (localDateChanged ? ' (次日)' : ''), 
+        c.location || '', teacherName, studentNames, c.description || '', c.color];
+    }
+    
     return [c.name, c.date, wd, c.startTime, c.endTime, c.location || '', teacherName, studentNames, c.description || '', c.color];
   });
 
@@ -3140,7 +3354,11 @@ function exportCSV() {
   // 文件名包含筛选信息
   let fileSuffix = '';
   if (studentFilter) {
-    fileSuffix += '_' + (DB.students.find(s => s.id === studentFilter) ? DB.students.find(s => s.id === studentFilter).name : '') + '排课表';
+    const stu = DB.students.find(s => s.id === studentFilter);
+    fileSuffix += '_' + (stu ? stu.name : '') + '排课表';
+    if (isOverseas) {
+      fileSuffix += '_' + getTimezoneShortName(studentTz);
+    }
   } else if (teacherFilter) {
     const tName = teacherFilter === 'guest' ? '兼职老师' : (getTeacherById(teacherFilter) ? getTeacherById(teacherFilter).name : '');
     fileSuffix += '_' + tName;
